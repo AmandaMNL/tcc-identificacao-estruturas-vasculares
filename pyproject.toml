@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vascular-segmentation-tcc"
+version = "0.1.0"
+description = "Segmentacao exploratoria de estruturas vasculares em imagens de tecidos tumorais"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0,<3",
+    "pillow>=11,<13",
+    "torch>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.12,<1",
+]
+
+[project.scripts]
+vascular-segmentation = "vascular_segmentation.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vascular_segmentation"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.uv]
+required-version = ">=0.11.16,<0.12"
