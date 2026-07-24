@@ -7,7 +7,11 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --watch --inspect --env-file .env src/index.ts",
+    "neo4j:up": "docker compose up -d",
+    "neo4j:down": "docker compose down",
+    "neo4j:seed": "node --env-file=.env --import tsx src/services/seed.ts",
+    "analyze:image": "node --env-file=.env --import tsx src/index.ts"
   },
   "repository": {
     "type": "git",
@@ -19,7 +23,19 @@
     "url": "https://github.com/AmandaMNL/tcc-identificacao-estruturas-vasculares/issues"
   },
   "homepage": "https://github.com/AmandaMNL/tcc-identificacao-estruturas-vasculares#readme",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1"
+  },
   "dependencies": {
-    "@types/node": "^26.1.1"
+    "@langchain/community": "^1.1.29",
+    "@langchain/core": "^1.2.3",
+    "@langchain/langgraph": "^1.4.8",
+    "@langchain/openai": "^1.5.5",
+    "langchain": "^1.5.3",
+    "neo4j-driver": "^6.2.0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
   }
 }
