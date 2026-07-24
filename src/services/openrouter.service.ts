@@ -10,8 +10,13 @@ export type LLMResponse = {
 
 export class OpenRouterService {
   private llmClient: ChatOpenAI;
+  private maxAttempts: number;
+  private baseRetryDelayMs: number;
 
   constructor() {
+    this.maxAttempts = Number(process.env.OPENROUTER_MAX_ATTEMPTS ?? 3);
+    this.baseRetryDelayMs = Number(process.env.OPENROUTER_RETRY_DELAY_MS ?? 2000);
+
     this.llmClient = new ChatOpenAI({
       apiKey: config.openrouterKey,
       modelName: config.models[0],
@@ -31,32 +36,56 @@ export class OpenRouterService {
     })
   }
 
+  private isRateLimitError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('429') || message.includes('MODEL_RATE_LIMIT') || message.includes('rate limit');
+  }
+
+  private async waitBeforeRetry(attempt: number): Promise<void> {
+    const delayMs = this.baseRetryDelayMs * attempt;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
   async generateStructured<T>(
     systemPrompt: string,
     userPrompt: string,
     schema: z.ZodSchema<T>
   ) {
-    try {
-      const messages = [
-        new SystemMessage(systemPrompt),
-        new HumanMessage(userPrompt)
-      ]
-      const structuredLlm = this.llmClient.withStructuredOutput(schema, {
-        name: 'response'
-      });
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      try {
+        const messages = [
+          new SystemMessage(systemPrompt),
+          new HumanMessage(userPrompt)
+        ]
+        const structuredLlm = this.llmClient.withStructuredOutput(schema, {
+          name: 'response'
+        });
 
-      const data = await structuredLlm.invoke(messages);
+        const data = await structuredLlm.invoke(messages);
 
-      return {
-        success: true,
-        data,
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
+        return {
+          success: true,
+          data,
+        }
+      } catch (error) {
+        const shouldRetry = this.isRateLimitError(error) && attempt < this.maxAttempts;
+
+        if (shouldRetry) {
+          await this.waitBeforeRetry(attempt);
+          continue;
+        }
+
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        }
       }
     }
+
+    return {
+      success: false,
+      error: 'OpenRouter request failed after retries.',
+    };
   }
 
   async generateStructuredFromImage<T>(
@@ -66,40 +95,54 @@ export class OpenRouterService {
     schema: z.ZodSchema<T>,
     imageMimeType = 'image/png',
   ) {
-    try {
-      const messages = [
-        new SystemMessage(systemPrompt),
-        new HumanMessage({
-          content: [
-            {
-              type: 'text',
-              text: userTextPrompt,
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:${imageMimeType};base64,${imageBase64}`,
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      try {
+        const messages = [
+          new SystemMessage(systemPrompt),
+          new HumanMessage({
+            content: [
+              {
+                type: 'text',
+                text: userTextPrompt,
               },
-            },
-          ],
-        }),
-      ];
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${imageMimeType};base64,${imageBase64}`,
+                },
+              },
+            ],
+          }),
+        ];
 
-      const structuredLlm = this.llmClient.withStructuredOutput(schema, {
-        name: 'response',
-      });
+        const structuredLlm = this.llmClient.withStructuredOutput(schema, {
+          name: 'response',
+        });
 
-      const data = await structuredLlm.invoke(messages);
+        const data = await structuredLlm.invoke(messages);
 
-      return {
-        success: true,
-        data,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
+        return {
+          success: true,
+          data,
+        };
+      } catch (error) {
+        const shouldRetry = this.isRateLimitError(error) && attempt < this.maxAttempts;
+
+        if (shouldRetry) {
+          await this.waitBeforeRetry(attempt);
+          continue;
+        }
+
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
+
+    return {
+      success: false,
+      error: 'OpenRouter image request failed after retries.',
+    };
   }
 }
