@@ -1,9 +1,11 @@
 import { START, END, StateGraph } from '@langchain/langgraph';
-import type { OpenRouterService } from '../services/openrouter.service.ts';
 import { z } from 'zod';
 import { getImage } from './nodes/get.image.ts';
 import { processImage } from './nodes/process.image.ts';
 import { llmResponse } from './nodes/llm.response.ts';
+import type { ImageService } from '../services/image.service.ts';
+import type { ImageTransformService } from '../services/image.transform.ts';
+import type { StructuredLlmService } from '../services/openrouter.service.ts';
 
 export const schema = z.object({
   model: z.string().default('openai/gpt-5-image-mini'),
@@ -16,21 +18,35 @@ export const schema = z.object({
 
 export type GraphState = z.infer<typeof schema>;
 
+export type GraphDependencies = {
+  llmClient: StructuredLlmService;
+  imageService: ImageService;
+  imageTransformService: ImageTransformService;
+  defaultImagePath?: string;
+  topK?: number;
+  sendImageToLlm?: boolean;
+};
+
 export function buildGraph(
-  llmClient: OpenRouterService,
-  imagePath: string,
+  dependencies: GraphDependencies,
 ) {
   const workflow = new StateGraph({
     stateSchema: schema,
   })
-    .addNode('getImage', getImage(imagePath))
-    .addNode('processImage', processImage())
-    .addNode('llmResponse', llmResponse(llmClient))
+    .addNode('getImage', getImage(dependencies.defaultImagePath ?? ''))
+    .addNode('processImage', processImage({
+      imageService: dependencies.imageService,
+      imageTransformService: dependencies.imageTransformService,
+    }))
+    .addNode('generateLlmResponse', llmResponse({
+      llmClient: dependencies.llmClient,
+      imageService: dependencies.imageService,
+    }))
 
     .addEdge(START, 'getImage')
     .addEdge('getImage', 'processImage')
-    .addEdge('processImage', 'llmResponse')
-    .addEdge('llmResponse', END);
+    .addEdge('processImage', 'generateLlmResponse')
+    .addEdge('generateLlmResponse', END);
 
   return workflow.compile();
 }

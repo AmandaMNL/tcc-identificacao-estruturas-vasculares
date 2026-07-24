@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import neo4j, { type ManagedTransaction, type Session } from 'neo4j-driver';
+import type { Session } from 'neo4j-driver';
+import { ImageSeedTransformService } from './image.seed.transform.ts';
+import { Neo4jService } from './neo4j.service.ts';
 
 type CocoImage = {
   id: number;
@@ -47,71 +49,38 @@ type DcisEntry = {
 const COCO_PATH = path.resolve(process.cwd(), 'data/annotations/COCO_annotations.json');
 const DCIS_PATH = path.resolve(process.cwd(), 'data/annotations/DCIS.Patient_001.2.json');
 
-const NEO4J_URI = process.env.NEO4J_URI ?? 'bolt://localhost:7687';
-const NEO4J_USER = process.env.NEO4J_USER ?? 'neo4j';
-const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD ?? 'neo4j_password';
-const NEO4J_DATABASE = process.env.NEO4J_DATABASE ?? 'neo4j';
 const BATCH_SIZE = Number(process.env.NEO4J_SEED_BATCH_SIZE ?? 300);
 const CLEAR_EXISTING = (process.env.NEO4J_SEED_CLEAR ?? 'false').toLowerCase() === 'true';
-
-const chunk = <T,>(items: T[], size: number): T[][] => {
-  const result: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    result.push(items.slice(i, i + size));
-  }
-  return result;
-};
 
 const readJsonFile = <T,>(filePath: string): T => {
   const raw = readFileSync(filePath, 'utf-8');
   return JSON.parse(raw) as T;
 };
 
-const runBatched = async <T,>(
-  session: Session,
-  query: string,
-  rows: T[],
-  label: string,
-) => {
-  const groups = chunk(rows, BATCH_SIZE);
-  for (let i = 0; i < groups.length; i += 1) {
-    const group = groups[i];
-    await session.executeWrite((tx: ManagedTransaction) => tx.run(query, { rows: group }));
-    console.log(`[seed] ${label}: lote ${i + 1}/${groups.length} (${group.length} itens)`);
-  }
-};
-
-const createConstraints = async (session: Session) => {
-  await session.executeWrite((tx: ManagedTransaction) =>
-    tx.run('CREATE CONSTRAINT image_id IF NOT EXISTS FOR (n:Image) REQUIRE n.id IS UNIQUE'),
-  );
-  await session.executeWrite((tx: ManagedTransaction) =>
-    tx.run('CREATE CONSTRAINT annotation_id IF NOT EXISTS FOR (n:Annotation) REQUIRE n.id IS UNIQUE'),
-  );
-  await session.executeWrite((tx: ManagedTransaction) =>
-    tx.run('CREATE CONSTRAINT category_id IF NOT EXISTS FOR (n:Category) REQUIRE n.id IS UNIQUE'),
-  );
-  await session.executeWrite((tx: ManagedTransaction) =>
-    tx.run('CREATE CONSTRAINT tile_id IF NOT EXISTS FOR (n:Tile) REQUIRE n.id IS UNIQUE'),
-  );
+const createConstraints = async (neo4jService: Neo4jService, session: Session) => {
+  await neo4jService.executeWrite(session, 'CREATE CONSTRAINT image_id IF NOT EXISTS FOR (n:Image) REQUIRE n.id IS UNIQUE');
+  await neo4jService.executeWrite(session, 'CREATE CONSTRAINT annotation_id IF NOT EXISTS FOR (n:Annotation) REQUIRE n.id IS UNIQUE');
+  await neo4jService.executeWrite(session, 'CREATE CONSTRAINT category_id IF NOT EXISTS FOR (n:Category) REQUIRE n.id IS UNIQUE');
+  await neo4jService.executeWrite(session, 'CREATE CONSTRAINT tile_id IF NOT EXISTS FOR (n:Tile) REQUIRE n.id IS UNIQUE');
 };
 
 const main = async () => {
   const coco = readJsonFile<CocoFile>(COCO_PATH);
   const dcis = readJsonFile<DcisEntry[]>(DCIS_PATH);
+  const imageSeedTransformService = new ImageSeedTransformService();
+  const neo4jService = new Neo4jService();
 
-  const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
-  await driver.verifyConnectivity();
+  await neo4jService.verifyConnectivity();
 
-  const session = driver.session({ database: NEO4J_DATABASE });
+  const session = neo4jService.createSession();
 
   try {
     if (CLEAR_EXISTING) {
-      await session.executeWrite((tx: ManagedTransaction) => tx.run('MATCH (n) DETACH DELETE n'));
+      await neo4jService.executeWrite(session, 'MATCH (n) DETACH DELETE n');
       console.log('[seed] Banco limpo (NEO4J_SEED_CLEAR=true).');
     }
 
-    await createConstraints(session);
+    await createConstraints(neo4jService, session);
 
     const categoriesRows = coco.categories.map((category) => ({
       id: category.id,
@@ -120,7 +89,7 @@ const main = async () => {
       raw_json: JSON.stringify(category),
     }));
 
-    await runBatched(
+    await neo4jService.runBatched(
       session,
       `
       UNWIND $rows AS row
@@ -130,20 +99,12 @@ const main = async () => {
           c.raw_json = row.raw_json
       `,
       categoriesRows,
-      'categorias',
+      { batchSize: BATCH_SIZE, label: 'categorias' },
     );
 
-    const imageRows = coco.images.map((image) => ({
-      id: image.id,
-      file_name: image.file_name,
-      width: image.width,
-      height: image.height,
-      license: image.license ?? null,
-      date_captured: image.date_captured ?? null,
-      raw_json: JSON.stringify(image),
-    }));
+    const imageRows = coco.images.map((image) => imageSeedTransformService.toSeedImageRow(image));
 
-    await runBatched(
+    await neo4jService.runBatched(
       session,
       `
       UNWIND $rows AS row
@@ -156,7 +117,7 @@ const main = async () => {
           i.raw_json = row.raw_json
       `,
       imageRows,
-      'imagens',
+      { batchSize: BATCH_SIZE, label: 'imagens' },
     );
 
     const annotationRows = coco.annotations.map((annotation) => ({
@@ -170,7 +131,7 @@ const main = async () => {
       raw_json: JSON.stringify(annotation),
     }));
 
-    await runBatched(
+    await neo4jService.runBatched(
       session,
       `
       UNWIND $rows AS row
@@ -190,13 +151,13 @@ const main = async () => {
       MERGE (a)-[:HAS_CATEGORY]->(c)
       `,
       annotationRows,
-      'anotacoes',
+      { batchSize: BATCH_SIZE, label: 'anotacoes' },
     );
 
     const tileRows = dcis.map((entry) => ({
       id: entry.id,
       key: entry.key ?? null,
-      file_name: entry.file_name ?? null,
+      file_name: entry.file_name ? imageSeedTransformService.normalizeFileName(entry.file_name) : null,
       width: entry.width ?? null,
       height: entry.height ?? null,
       mpp: entry.mpp ?? null,
@@ -205,7 +166,7 @@ const main = async () => {
       raw_json: JSON.stringify(entry),
     }));
 
-    await runBatched(
+    await neo4jService.runBatched(
       session,
       `
       UNWIND $rows AS row
@@ -223,22 +184,21 @@ const main = async () => {
       MERGE (t)-[:REFERS_TO_IMAGE]->(i)
       `,
       tileRows,
-      'tiles',
+      { batchSize: BATCH_SIZE, label: 'tiles' },
     );
 
-    const countsResult = await session.executeRead((tx: ManagedTransaction) =>
-      tx.run(
-        `
-        MATCH (i:Image)
-        WITH count(i) AS images
-        MATCH (a:Annotation)
-        WITH images, count(a) AS annotations
-        MATCH (c:Category)
-        WITH images, annotations, count(c) AS categories
-        MATCH (t:Tile)
-        RETURN images, annotations, categories, count(t) AS tiles
-        `,
-      ),
+    const countsResult = await neo4jService.executeRead(
+      session,
+      `
+      MATCH (i:Image)
+      WITH count(i) AS images
+      MATCH (a:Annotation)
+      WITH images, count(a) AS annotations
+      MATCH (c:Category)
+      WITH images, annotations, count(c) AS categories
+      MATCH (t:Tile)
+      RETURN images, annotations, categories, count(t) AS tiles
+      `,
     );
 
     const stats = countsResult.records[0]?.toObject() ?? {};
@@ -246,7 +206,7 @@ const main = async () => {
     console.log('[seed] Contagens:', stats);
   } finally {
     await session.close();
-    await driver.close();
+    await neo4jService.close();
   }
 };
 

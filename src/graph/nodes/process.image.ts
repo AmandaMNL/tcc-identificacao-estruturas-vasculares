@@ -1,31 +1,16 @@
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { GraphState } from '../graph.ts';
-import { ImageTransformService } from '../../services/image.transform.ts';
+import type { ImageService } from '../../services/image.service.ts';
+import type { ImageTransformService } from '../../services/image.transform.ts';
+import config from '../../config.ts';
 
-const DEFAULT_TOP_K = Number(process.env.NEO4J_TOP_K ?? 3);
-const SEND_IMAGE_TO_LLM = (process.env.LLM_SEND_IMAGE ?? 'true').toLowerCase() === 'true';
-
-const resolveLocalImagePath = (imagePath: string): string => {
-  const directPath = path.resolve(process.cwd(), imagePath);
-
-  if (existsSync(directPath)) {
-    return directPath;
-  }
-
-  const ext = path.extname(imagePath) || '.png';
-  const base = path.basename(imagePath, ext);
-  const fallbackName = `${base}_rgb_labels${ext}`;
-  const fallbackPath = path.resolve(process.cwd(), 'data/images', fallbackName);
-
-  if (existsSync(fallbackPath)) {
-    return fallbackPath;
-  }
-
-  throw new Error(`Image file not found: ${imagePath}`);
+type ProcessImageDependencies = {
+  imageTransformService: Pick<ImageTransformService, 'getImageContext'>;
+  imageService: Pick<ImageService, 'readAsBase64'>;
 };
 
-export function processImage() {
+export function processImage(dependencies: ProcessImageDependencies) {
+  const topK = config.topK;
+  const sendImageToLlm = config.sendImageToLlm;
 
   return async (state: GraphState): Promise<Partial<GraphState>> => {
     const imagePath = state.imagePath?.trim();
@@ -34,22 +19,16 @@ export function processImage() {
       throw new Error('imagePath is required to load image and Neo4j context.');
     }
 
-    const imageBase64 = SEND_IMAGE_TO_LLM
-      ? readFileSync(resolveLocalImagePath(imagePath)).toString('base64')
+    const imageBase64 = sendImageToLlm
+      ? dependencies.imageService.readAsBase64(imagePath)
       : '';
 
-    const imageTransformService = new ImageTransformService();
+    const imageContext = await dependencies.imageTransformService.getImageContext(imagePath, topK);
 
-    try {
-      const imageContext = await imageTransformService.getImageContext(imagePath, DEFAULT_TOP_K);
-
-      return {
-        imagePath,
-        imageBase64,
-        content: imageContext.promptContext,
-      };
-    } finally {
-      await imageTransformService.close();
-    }
+    return {
+      imagePath,
+      imageBase64,
+      content: imageContext.promptContext,
+    };
   };
 }

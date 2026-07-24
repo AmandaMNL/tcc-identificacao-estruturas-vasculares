@@ -1,5 +1,6 @@
 import path from 'node:path';
-import neo4j, { type Driver, type ManagedTransaction } from 'neo4j-driver';
+import neo4j from 'neo4j-driver';
+import { Neo4jService } from './neo4j.service.ts';
 
 type Neo4jImageNode = {
   id: number;
@@ -45,11 +46,6 @@ export type ImageTransformResult = {
   topAnnotations: AnnotationSample[];
   promptContext: string;
 };
-
-const DEFAULT_URI = process.env.NEO4J_URI ?? 'bolt://localhost:7687';
-const DEFAULT_USER = process.env.NEO4J_USER ?? 'neo4j';
-const DEFAULT_PASSWORD = process.env.NEO4J_PASSWORD ?? 'neo4j_password';
-const DEFAULT_DATABASE = process.env.NEO4J_DATABASE ?? 'neo4j';
 
 const asNumber = (value: unknown): number => {
   if (typeof value === 'number') {
@@ -98,19 +94,14 @@ const toImageId = (fileName: string): number | null => {
 };
 
 export class ImageTransformService {
-  private readonly driver: Driver;
-  private readonly database: string;
+  private readonly neo4jService: Neo4jService;
 
-  constructor() {
-    this.driver = neo4j.driver(
-      DEFAULT_URI,
-      neo4j.auth.basic(DEFAULT_USER, DEFAULT_PASSWORD),
-    );
-    this.database = DEFAULT_DATABASE;
+  constructor(neo4jService = new Neo4jService()) {
+    this.neo4jService = neo4jService;
   }
 
   async close(): Promise<void> {
-    await this.driver.close();
+    await this.neo4jService.close();
   }
 
   async getImageContext(imagePathOrFileName: string, topK = 3): Promise<ImageTransformResult> {
@@ -118,10 +109,10 @@ export class ImageTransformService {
     const imageId = toImageId(fileName);
     const limitedTopK = clampTopK(topK);
 
-    const session = this.driver.session({ database: this.database });
+    const session = this.neo4jService.createSession();
 
     try {
-      const imageResult = await session.executeRead((tx: ManagedTransaction) =>
+      const imageResult = await session.executeRead((tx) =>
         tx.run(
           `
           MATCH (i:Image {file_name: $fileName})
@@ -135,7 +126,7 @@ export class ImageTransformService {
 
       const suffixImageResult = imageResult.records.length > 0
         ? imageResult
-        : await session.executeRead((tx: ManagedTransaction) =>
+        : await session.executeRead((tx) =>
           tx.run(
             `
             MATCH (i:Image)
@@ -150,7 +141,7 @@ export class ImageTransformService {
 
       const tileMappedResult = suffixImageResult.records.length > 0
         ? suffixImageResult
-        : await session.executeRead((tx: ManagedTransaction) =>
+        : await session.executeRead((tx) =>
           tx.run(
             `
             MATCH (t:Tile {file_name: $fileName})
@@ -164,7 +155,7 @@ export class ImageTransformService {
 
       const resolvedImageResult = tileMappedResult.records.length > 0
         ? tileMappedResult
-        : await session.executeRead((tx: ManagedTransaction) =>
+        : await session.executeRead((tx) =>
           tx.run(
             `
             MATCH (i:Image {id: $imageId})
@@ -191,7 +182,7 @@ export class ImageTransformService {
       const tileNode = tileValue?.properties as Record<string, unknown> | undefined;
       const resolvedImageId = asNumber(imageNode.id);
 
-      const topCategoriesResult = await session.executeRead((tx: ManagedTransaction) =>
+      const topCategoriesResult = await session.executeRead((tx) =>
         tx.run(
           `
           MATCH (i:Image {id: $imageId})
@@ -209,7 +200,7 @@ export class ImageTransformService {
         ),
       );
 
-      const topAnnotationsResult = await session.executeRead((tx: ManagedTransaction) =>
+      const topAnnotationsResult = await session.executeRead((tx) =>
         tx.run(
           `
           MATCH (i:Image {id: $imageId})

@@ -8,10 +8,34 @@ export type LLMResponse = {
   content: string;
 }
 
-export class OpenRouterService {
+type StructuredLlmResult<T> = {
+  success: boolean;
+  data?: T;
+  error?: string;
+};
+
+export type StructuredLlmService = {
+  generateStructured(
+    systemPrompt: string,
+    userPrompt: string,
+    schema: z.ZodSchema,
+  ): Promise<StructuredLlmResult<Record<string, unknown>>>;
+  generateStructuredFromImage(
+    systemPrompt: string,
+    userTextPrompt: string,
+    imageBase64: string,
+    schema: z.ZodSchema,
+    imageMimeType?: string,
+  ): Promise<StructuredLlmResult<Record<string, unknown>>>;
+};
+
+export class OpenRouterService implements StructuredLlmService {
   private llmClient: ChatOpenAI;
   private maxAttempts: number;
   private baseRetryDelayMs: number;
+
+  private static readonly CONTROL_CHARS_REGEX = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+  private static readonly BACKSPACE_HEX_GARBAGE_REGEX = /\u0008[0-9a-f]/gi;
 
   constructor() {
     this.maxAttempts = Number(process.env.OPENROUTER_MAX_ATTEMPTS ?? 3);
@@ -46,11 +70,39 @@ export class OpenRouterService {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
-  async generateStructured<T>(
+  private sanitizeString(value: string): string {
+    return value
+      .replace(OpenRouterService.BACKSPACE_HEX_GARBAGE_REGEX, '')
+      .replace(OpenRouterService.CONTROL_CHARS_REGEX, '')
+      .normalize('NFC');
+  }
+
+  private sanitizeData(value: unknown): unknown {
+    if (typeof value === 'string') {
+      return this.sanitizeString(value);
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeData(item));
+    }
+
+    if (value && typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>).map(([key, fieldValue]) => [
+        key,
+        this.sanitizeData(fieldValue),
+      ]);
+
+      return Object.fromEntries(entries);
+    }
+
+    return value;
+  }
+
+  async generateStructured(
     systemPrompt: string,
     userPrompt: string,
-    schema: z.ZodSchema<T>
-  ) {
+    schema: z.ZodSchema,
+  ): Promise<StructuredLlmResult<Record<string, unknown>>> {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
         const messages = [
@@ -61,7 +113,9 @@ export class OpenRouterService {
           name: 'response'
         });
 
-        const data = await structuredLlm.invoke(messages);
+        const data = this.sanitizeData(
+          await structuredLlm.invoke(messages),
+        ) as Record<string, unknown>;
 
         return {
           success: true,
@@ -88,13 +142,13 @@ export class OpenRouterService {
     };
   }
 
-  async generateStructuredFromImage<T>(
+  async generateStructuredFromImage(
     systemPrompt: string,
     userTextPrompt: string,
     imageBase64: string,
-    schema: z.ZodSchema<T>,
+    schema: z.ZodSchema,
     imageMimeType = 'image/png',
-  ) {
+  ): Promise<StructuredLlmResult<Record<string, unknown>>> {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
         const messages = [
@@ -119,7 +173,9 @@ export class OpenRouterService {
           name: 'response',
         });
 
-        const data = await structuredLlm.invoke(messages);
+        const data = this.sanitizeData(
+          await structuredLlm.invoke(messages),
+        ) as Record<string, unknown>;
 
         return {
           success: true,

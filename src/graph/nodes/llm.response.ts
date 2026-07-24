@@ -1,8 +1,9 @@
-import path from 'node:path';
 import { z } from 'zod';
 import { getSystemPrompt, getUserPromptTemplate } from '../../prompts/image.analiser.ts';
-import type { OpenRouterService } from '../../services/openrouter.service.ts';
+import type { ImageService } from '../../services/image.service.ts';
+import type { StructuredLlmService } from '../../services/openrouter.service.ts';
 import type { GraphState } from '../graph.ts';
+import config from '../../config.ts';
 
 const responseSchema = z.object({
   summary: z.string(),
@@ -11,33 +12,26 @@ const responseSchema = z.object({
   follow_up_questions: z.array(z.string()).min(1).max(3),
 });
 
-const MIME_BY_EXTENSION: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
+type LlmResponseDependencies = {
+  llmClient: StructuredLlmService;
+  imageService: Pick<ImageService, 'resolveMimeType'>;
 };
 
-const resolveMimeType = (imagePath: string): string => {
-  const ext = path.extname(imagePath).toLowerCase();
-  return MIME_BY_EXTENSION[ext] ?? 'image/png';
-};
+export function llmResponse(dependencies: LlmResponseDependencies) {
+  const sendImageToLlm = config.sendImageToLlm;
 
-const SEND_IMAGE_TO_LLM = (process.env.LLM_SEND_IMAGE ?? 'true').toLowerCase() === 'true';
-
-export function llmResponse(llmClient: OpenRouterService) {
   return async (state: GraphState): Promise<Partial<GraphState>> => {
     const systemPrompt = getSystemPrompt();
     const userPrompt = getUserPromptTemplate(state.question, state.content);
-    const result = SEND_IMAGE_TO_LLM
-      ? await llmClient.generateStructuredFromImage(
+    const result = sendImageToLlm
+      ? await dependencies.llmClient.generateStructuredFromImage(
         systemPrompt,
         userPrompt,
         state.imageBase64,
         responseSchema,
-        resolveMimeType(state.imagePath),
+        dependencies.imageService.resolveMimeType(state.imagePath),
       )
-      : await llmClient.generateStructured(
+      : await dependencies.llmClient.generateStructured(
         systemPrompt,
         userPrompt,
         responseSchema,

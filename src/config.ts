@@ -4,7 +4,8 @@ const config = {
   httpReferer: process.env.OPENROUTER_HTTP_REFERER,
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
-    'google/gemma-4-26b-a4b-it:free',
+    // 'google/gemma-4-26b-a4b-it:free',
+    'meta-llama/llama-3.1-70b-instruct'
   ],
   provider: {
     sort: {
@@ -13,7 +14,11 @@ const config = {
     }
   },
   temperature: 0.2,
-  topK: 2,
+  topK: 1,
+  defaultImagePath: '',
+  sendImageToLlm: false,
+  maxAttempts: 3,
+  baseRetryDelayMs: 2000,
 };
 
 export default config;

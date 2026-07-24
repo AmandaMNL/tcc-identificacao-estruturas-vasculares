@@ -72,6 +72,8 @@ export const getUserPromptTemplate = (question: string, imageContext: string) =>
       'Carefully analyze the image and prioritize vascular structure identification.',
       'Use the Neo4j context as supporting evidence, but trust the visual evidence from the image first.',
       'Report vessel-related findings with objective values when possible.',
+      'Match the language of the question.',
+      'Answer only in Portuguese, use utf-8 to avoid encoding issues.'
     ],
   });
 };
