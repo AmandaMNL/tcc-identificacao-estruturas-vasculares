@@ -4,7 +4,6 @@ const config = {
   httpReferer: process.env.OPENROUTER_HTTP_REFERER,
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
-    // 'google/gemma-4-26b-a4b-it:free',
     'meta-llama/llama-3.1-70b-instruct'
   ],
   provider: {
