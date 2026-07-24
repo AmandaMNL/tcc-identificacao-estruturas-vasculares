@@ -13,7 +13,8 @@
     "neo4j:down": "docker compose down",
     "neo4j:seed": "node --env-file=.env --import tsx src/services/seed.ts",
     "analyze:image": "node --env-file=.env --import tsx src/index.ts",
-    "analyze:image:debug": "node --inspect --env-file=.env --import tsx src/index.ts"
+    "analyze:image:debug": "node --inspect --env-file=.env --import tsx src/index.ts",
+    "langgraph:serve": "npx @langchain/langgraph-cli@latest dev"
   },
   "repository": {
     "type": "git",

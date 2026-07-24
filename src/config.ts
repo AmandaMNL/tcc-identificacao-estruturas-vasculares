@@ -4,7 +4,8 @@ const config = {
   httpReferer: process.env.OPENROUTER_HTTP_REFERER,
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
-    'meta-llama/llama-3.1-70b-instruct'
+    // 'meta-llama/llama-3.1-70b-instruct',
+    'google/gemini-3.1-flash-image'
   ],
   provider: {
     sort: {
@@ -15,7 +16,7 @@ const config = {
   temperature: 0.2,
   topK: 1,
   defaultImagePath: '',
-  sendImageToLlm: false,
+  sendImageToLlm: true,
   maxAttempts: 3,
   baseRetryDelayMs: 2000,
 };

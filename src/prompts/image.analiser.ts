@@ -64,9 +64,9 @@ export const getSystemPrompt = () => {
   });
 };
 
-export const getUserPromptTemplate = (question: string, imageContext: string) => {
+export const getUserPromptTemplate = (imageContext: string) => {
   return JSON.stringify({
-    question,
+    role: 'professional lab technician',
     context_from_neo4j_topk: imageContext,
     instructions: [
       'Carefully analyze the image and prioritize vascular structure identification.',
@@ -75,5 +75,6 @@ export const getUserPromptTemplate = (question: string, imageContext: string) =>
       'Match the language of the question.',
       'Answer only in Portuguese, use utf-8 to avoid encoding issues.'
     ],
+    question: 'Identifique as estruturas vasculares presentes na imagem e responda em JSON compacto com este formato: {"vascular_structures":[{"id":"v1","x":0,"y":0,"confidence":0.0}],"tumor_boundaries":[{"x":0,"y":0}],"has_vascular_structures":true,"annotated_image_base64":"..."}. Marque na imagem apenas estruturas vasculares e limites tumorais (se houver), gere somente 1 imagem anotada, reduza para no maximo 1024px no maior lado, use JPEG qualidade ~70 para diminuir tamanho e acelerar processamento, sem texto extra fora do JSON. Se nao houver estruturas vasculares, retorne vascular_structures vazio e has_vascular_structures=false.',
   });
 };

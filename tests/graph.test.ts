@@ -49,19 +49,33 @@ const mockLlmService = {
   generateStructured: async (..._args: unknown[]) => ({
     success: true,
     data: {
-      summary: 'Vascular structures identified.',
-      vascular_findings: ['not dilated vessel'],
-      confidence: 0.92,
-      follow_up_questions: ['Is there a region of high dilation?'],
+      vascular_structures: [
+        {
+          id: 'v1',
+          x: 10,
+          y: 20,
+          confidence: 0.92,
+        },
+      ],
+      tumor_boundaries: [{ x: 5, y: 5 }],
+      has_vascular_structures: true,
+      annotated_image_base64: 'ZmFrZS1hbm5vdGF0ZWQtaW1hZ2U=',
     },
   }),
   generateStructuredFromImage: async (..._args: unknown[]) => ({
     success: true,
     data: {
-      summary: 'Vascular structures identified from image and context.',
-      vascular_findings: ['not dilated vessel'],
-      confidence: 0.95,
-      follow_up_questions: ['Can you provide another tile from the same area?'],
+      vascular_structures: [
+        {
+          id: 'v1',
+          x: 15,
+          y: 25,
+          confidence: 0.95,
+        },
+      ],
+      tumor_boundaries: [{ x: 6, y: 6 }],
+      has_vascular_structures: true,
+      annotated_image_base64: 'ZmFrZS1hbm5vdGF0ZWQtaW1hZ2UtZnJvbS1sbG0=',
     },
   }),
 } as unknown as StructuredLlmService;
@@ -82,6 +96,7 @@ test('graph should process image and prompt and return llmResponse', async () =>
   assert.ok(result.content.length > 0);
 
   const parsedResponse = JSON.parse(result.llmResponse);
-  assert.equal(parsedResponse.summary, 'Vascular structures identified from image and context.');
-  assert.equal(parsedResponse.vascular_findings[0], 'not dilated vessel');
+  assert.equal(parsedResponse.has_vascular_structures, true);
+  assert.equal(parsedResponse.vascular_structures[0].id, 'v1');
+  assert.equal(parsedResponse.annotated_image_base64, 'ZmFrZS1hbm5vdGF0ZWQtaW1hZ2UtZnJvbS1sbG0=');
 });
