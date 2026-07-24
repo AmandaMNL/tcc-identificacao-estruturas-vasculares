@@ -26,6 +26,7 @@
   },
   "homepage": "https://github.com/AmandaMNL/tcc-identificacao-estruturas-vasculares#readme",
   "devDependencies": {
+    "@langchain/langgraph-cli": "1.4.3",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1"
   },

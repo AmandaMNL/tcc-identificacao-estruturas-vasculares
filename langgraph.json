@@ -1,5 +1,5 @@
 {
-  "node_version": "26",
+  "node_version": "24",
   "graphs": {
     "tcc": "./src/graph/factory.ts:graph"
   },
