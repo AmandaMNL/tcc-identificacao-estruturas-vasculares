@@ -1,70 +1,24 @@
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
-
-const COCO_PATH = path.resolve(process.cwd(), 'data/annotations/COCO_annotations.json');
-const DCIS_PATH = path.resolve(process.cwd(), 'data/annotations/DCIS.Patient_001.2.json');
-const MAX_CHARS_PER_ANNOTATION_FILE = 12000;
-
-const readFileText = (filePath: string) => {
-  if (!existsSync(filePath)) {
-    return `Arquivo nao encontrado: ${filePath}`;
-  }
-
-  return readFileSync(filePath, 'utf-8');
-};
-
-const truncateText = (text: string, maxChars: number) => {
-  if (text.length <= maxChars) {
-    return text;
-  }
-
-  const omittedChars = text.length - maxChars;
-  const marker = `[TRUNCATED: ${omittedChars} chars omitted to fit model context.]`;
-  const availableChars = maxChars - marker.length;
-
-  if (availableChars <= 0) {
-    return marker;
-  }
-
-  const headChars = Math.floor(availableChars / 2);
-  const tailChars = availableChars - headChars;
-  const head = text.slice(0, headChars);
-  const tail = text.slice(-tailChars);
-
-  return `${head}\n\n${marker}\n\n${tail}`;
-};
-
 export const getSystemPrompt = () => {
-  const cocoAnnotationsText = truncateText(
-    readFileText(COCO_PATH),
-    MAX_CHARS_PER_ANNOTATION_FILE,
-  );
-  const dcisAnnotationsText = truncateText(
-    readFileText(DCIS_PATH),
-    MAX_CHARS_PER_ANNOTATION_FILE,
-  );
-
   return JSON.stringify({
     role: 'Analista de imagem para identificar padroes e estruturas vasculares em imagens medicas. Forneca respostas detalhadas, com base em dados, e siga as instrucoes abaixo.',
     rules: [
-      'CRITICAL: Match the QUESTION language, NOT data language. English question = English answer, Portuguese question = Portuguese answer',
+      'Return valid JSON only. No markdown, no extra text, no code fences.',
       'Write complete analytical responses using actual data (no placeholders)',
-      'Include calculations: percentages, distributions, averages, comparisons',
-      'Start with key finding, use bullets for lists, highlight patterns',
-      'Provide 2-3 specific follow-up questions in the same language as the original question',
+      'Keep output compact and deterministic.',
       'Do NOT include queries or apologize for errors',
     ],
-    example: {
-      // #sym:example
-      annotation_files: {
-        coco_annotations_json: cocoAnnotationsText,
-        dcis_patient_001_2_json: dcisAnnotationsText,
-      },
-    },
   });
 };
 
-export const getUserPromptTemplate = (imageContext: string) => {
+type UserPromptOptions = {
+  sendImageToLlm: boolean;
+};
+
+export const getUserPromptTemplate = (imageContext: string, options: UserPromptOptions) => {
+  const question = options.sendImageToLlm
+    ? 'Identifique as estruturas vasculares presentes na imagem e responda SOMENTE em JSON compacto com este formato: {"summary":"...","has_vascular_structures":true,"annotated_image_base64":"..."}. O campo summary e obrigatorio e deve resumir os principais achados. Nao retorne coordenadas quando annotated_image_base64 for retornado. Gere apenas 1 imagem anotada com overlays minimos (somente vasos e limite tumoral), sem legenda e sem textos na imagem. Reencode a imagem anotada para JPEG progressivo qualidade 45 e redimensione para no maximo 512px no maior lado antes de converter para base64. Retorne base64 sem prefixo data:image. Se o base64 final passar de 120000 caracteres, reduza novamente a qualidade para 35 e tente de novo. Sem texto extra fora do JSON. Se nao houver estruturas vasculares, mantenha has_vascular_structures=false.'
+    : 'Identifique as estruturas vasculares presentes na imagem e responda SOMENTE em JSON compacto com este formato: {"summary":"...","has_vascular_structures":true,"vascular_structures":[{"id":null,"x":0,"y":0,"confidence":0.0}],"tumor_boundaries":[{"x":0,"y":0}]}. O campo summary e obrigatorio e deve resumir os principais achados. Quando sendImageToLlm estiver falso, sempre retorne as coordenadas em vascular_structures e tumor_boundaries (quando houver). Sem texto extra fora do JSON. Se nao houver estruturas vasculares, retorne vascular_structures vazio, tumor_boundaries vazio e has_vascular_structures=false.';
+
   return JSON.stringify({
     role: 'professional lab technician',
     context_from_neo4j_topk: imageContext,
@@ -75,6 +29,6 @@ export const getUserPromptTemplate = (imageContext: string) => {
       'Match the language of the question.',
       'Answer only in Portuguese, use utf-8 to avoid encoding issues.'
     ],
-    question: 'Identifique as estruturas vasculares presentes na imagem e responda em JSON compacto com este formato: {"vascular_structures":[{"id":"v1","x":0,"y":0,"confidence":0.0}],"tumor_boundaries":[{"x":0,"y":0}],"has_vascular_structures":true,"annotated_image_base64":"..."}. Marque na imagem apenas estruturas vasculares e limites tumorais (se houver), gere somente 1 imagem anotada, reduza para no maximo 1024px no maior lado, use JPEG qualidade ~70 para diminuir tamanho e acelerar processamento, sem texto extra fora do JSON. Se nao houver estruturas vasculares, retorne vascular_structures vazio e has_vascular_structures=false.',
+    question,
   });
 };

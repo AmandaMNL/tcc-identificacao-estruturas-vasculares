@@ -1,20 +1,20 @@
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { buildGraph } from '../src/graph/graph.ts';
-import { ImageService } from '../src/services/image.service.ts';
-import { ImageTransformService } from '../src/services/image.transform.ts';
+import { RagService } from '../src/services/rag.service.ts';
 import { OpenRouterService } from '../src/services/openrouter.service.ts';
 
 test('graph should use image from data and prompt builders from image.analiser.ts', async () => {
   const imagePath = 'data/images/2_rgb_labels.png';
+  const imageBase64 = readFileSync(imagePath).toString('base64');
 
   const graph = buildGraph({
     llmClient: new OpenRouterService(),
-    imageService: new ImageService(),
-    imageTransformService: new ImageTransformService(),
+    ragService: new RagService(),
   });
 
   const result = await graph.invoke({
-    imagePath,
+    imageBase64,
   });
 
   const parsedResponse = JSON.parse(result.llmResponse);

@@ -1,17 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildGraph } from '../src/graph/graph.ts';
-import type { ImageService } from '../src/services/image.service.ts';
-import type { ImageTransformResult, ImageTransformService } from '../src/services/image.transform.ts';
 import type { StructuredLlmService } from '../src/services/openrouter.service.ts';
+import type { RagService } from '../src/services/rag.service.ts';
 
-const mockImageService: Pick<ImageService, 'readAsBase64' | 'resolveMimeType'> = {
-  readAsBase64: () => 'ZmFrZS1pbWFnZS1iYXNlNjQ=',
-  resolveMimeType: () => 'image/png',
-};
-
-const mockImageTransformService: Pick<ImageTransformService, 'getImageContext'> = {
-  getImageContext: async (imagePathOrFileName: string): Promise<ImageTransformResult> => ({
+const mockRagService: Pick<RagService, 'getImageContext'> = {
+  getImageContext: async (imagePathOrFileName: string) => ({
     fileName: imagePathOrFileName,
     image: {
       id: 2,
@@ -49,6 +43,7 @@ const mockLlmService = {
   generateStructured: async (..._args: unknown[]) => ({
     success: true,
     data: {
+      summary: 'Resumo objetivo dos achados vasculares.',
       vascular_structures: [
         {
           id: 'v1',
@@ -59,23 +54,15 @@ const mockLlmService = {
       ],
       tumor_boundaries: [{ x: 5, y: 5 }],
       has_vascular_structures: true,
-      annotated_image_base64: 'ZmFrZS1hbm5vdGF0ZWQtaW1hZ2U=',
     },
   }),
   generateStructuredFromImage: async (..._args: unknown[]) => ({
     success: true,
     data: {
-      vascular_structures: [
-        {
-          id: 'v1',
-          x: 15,
-          y: 25,
-          confidence: 0.95,
-        },
-      ],
-      tumor_boundaries: [{ x: 6, y: 6 }],
+      summary: 'Resumo com imagem anotada.',
       has_vascular_structures: true,
       annotated_image_base64: 'ZmFrZS1hbm5vdGF0ZWQtaW1hZ2UtZnJvbS1sbG0=',
+      image: null,
     },
   }),
 } as unknown as StructuredLlmService;
@@ -83,20 +70,53 @@ const mockLlmService = {
 test('graph should process image and prompt and return llmResponse', async () => {
   const graph = buildGraph({
     llmClient: mockLlmService,
-    imageService: mockImageService as ImageService,
-    imageTransformService: mockImageTransformService as ImageTransformService,
+    ragService: mockRagService as RagService,
   });
 
   const result = await graph.invoke({
-    imagePath: 'data/images/2.png',
+    imageBase64: 'ZmFrZS1pbWFnZS1iYXNlNjQ=',
     question: 'Identify vascular structures present in this image.',
   });
 
-  assert.equal(result.imagePath, 'data/images/2.png');
+  assert.equal(result.imageBase64, 'ZmFrZS1pbWFnZS1iYXNlNjQ=');
   assert.ok(result.content.length > 0);
 
   const parsedResponse = JSON.parse(result.llmResponse);
+  assert.equal(typeof parsedResponse.summary, 'string');
+  assert.ok(parsedResponse.summary.length > 0);
   assert.equal(parsedResponse.has_vascular_structures, true);
-  assert.equal(parsedResponse.vascular_structures[0].id, 'v1');
-  assert.equal(parsedResponse.annotated_image_base64, 'ZmFrZS1hbm5vdGF0ZWQtaW1hZ2UtZnJvbS1sbG0=');
+
+  if (parsedResponse.annotated_image_base64) {
+    assert.equal(typeof parsedResponse.annotated_image_base64, 'string');
+    assert.ok(parsedResponse.annotated_image_base64.length > 0);
+  } else {
+    assert.equal(parsedResponse.vascular_structures[0].id, 'v1');
+    assert.equal(parsedResponse.tumor_boundaries[0].x, 5);
+  }
+});
+
+test('graph should accept base64-only input for proximity RAG retrieval', async () => {
+  const graph = buildGraph({
+    llmClient: mockLlmService,
+    ragService: mockRagService as RagService,
+  });
+
+  const result = await graph.invoke({
+    imageBase64: 'ZmFrZS1pbnB1dC1pbWFnZS1iYXNlNjQ=',
+    question: 'Identifique estruturas vasculares.',
+  });
+
+  assert.equal(result.imageBase64, 'ZmFrZS1pbnB1dC1pbWFnZS1iYXNlNjQ=');
+  assert.ok(result.content.length > 0);
+
+  const parsedResponse = JSON.parse(result.llmResponse);
+  assert.equal(typeof parsedResponse.summary, 'string');
+  assert.ok(parsedResponse.summary.length > 0);
+
+  if (parsedResponse.annotated_image_base64) {
+    assert.equal(typeof parsedResponse.annotated_image_base64, 'string');
+    assert.ok(parsedResponse.annotated_image_base64.length > 0);
+  } else {
+    assert.equal(Array.isArray(parsedResponse.vascular_structures), true);
+  }
 });

@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Session } from 'neo4j-driver';
 import { ImageSeedTransformService } from './image.seed.transform.ts';
 import { Neo4jService } from './neo4j.service.ts';
+import { getImageSignatureFromBuffer } from './image.signature.ts';
 
 type CocoImage = {
   id: number;
@@ -57,6 +58,20 @@ const readJsonFile = <T,>(filePath: string): T => {
   return JSON.parse(raw) as T;
 };
 
+const resolveImageBinaryPath = (normalizedFileName: string): string | null => {
+  const candidateByName = path.resolve(process.cwd(), 'data/images', normalizedFileName);
+  if (existsSync(candidateByName)) {
+    return candidateByName;
+  }
+
+  const ext = path.extname(normalizedFileName) || '.png';
+  const base = path.basename(normalizedFileName, ext);
+  const fallbackName = `${base}_rgb_labels${ext}`;
+  const candidateByFallback = path.resolve(process.cwd(), 'data/images', fallbackName);
+
+  return existsSync(candidateByFallback) ? candidateByFallback : null;
+};
+
 const createConstraints = async (neo4jService: Neo4jService, session: Session) => {
   await neo4jService.executeWrite(session, 'CREATE CONSTRAINT image_id IF NOT EXISTS FOR (n:Image) REQUIRE n.id IS UNIQUE');
   await neo4jService.executeWrite(session, 'CREATE CONSTRAINT annotation_id IF NOT EXISTS FOR (n:Annotation) REQUIRE n.id IS UNIQUE');
@@ -102,7 +117,44 @@ const main = async () => {
       { batchSize: BATCH_SIZE, label: 'categorias' },
     );
 
-    const imageRows = coco.images.map((image) => imageSeedTransformService.toSeedImageRow(image));
+    const imageRows = coco.images.map((image) => {
+      const row = imageSeedTransformService.toSeedImageRow(image);
+      const imageBinaryPath = resolveImageBinaryPath(row.file_name);
+
+      if (!imageBinaryPath) {
+        return {
+          ...row,
+          sig_mean: null,
+          sig_std: null,
+          sig_len: null,
+          sig_m0: null,
+          sig_m1: null,
+          sig_m2: null,
+          sig_m3: null,
+          sig_m4: null,
+          sig_m5: null,
+          sig_m6: null,
+          sig_m7: null,
+        };
+      }
+
+      const signature = getImageSignatureFromBuffer(readFileSync(imageBinaryPath));
+
+      return {
+        ...row,
+        sig_mean: signature.mean,
+        sig_std: signature.std,
+        sig_len: signature.byteLength,
+        sig_m0: signature.bands[0] ?? null,
+        sig_m1: signature.bands[1] ?? null,
+        sig_m2: signature.bands[2] ?? null,
+        sig_m3: signature.bands[3] ?? null,
+        sig_m4: signature.bands[4] ?? null,
+        sig_m5: signature.bands[5] ?? null,
+        sig_m6: signature.bands[6] ?? null,
+        sig_m7: signature.bands[7] ?? null,
+      };
+    });
 
     await neo4jService.runBatched(
       session,
@@ -114,6 +166,17 @@ const main = async () => {
           i.height = row.height,
           i.license = row.license,
           i.date_captured = row.date_captured,
+          i.sig_mean = row.sig_mean,
+          i.sig_std = row.sig_std,
+          i.sig_len = row.sig_len,
+          i.sig_m0 = row.sig_m0,
+          i.sig_m1 = row.sig_m1,
+          i.sig_m2 = row.sig_m2,
+          i.sig_m3 = row.sig_m3,
+          i.sig_m4 = row.sig_m4,
+          i.sig_m5 = row.sig_m5,
+          i.sig_m6 = row.sig_m6,
+          i.sig_m7 = row.sig_m7,
           i.raw_json = row.raw_json
       `,
       imageRows,

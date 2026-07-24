@@ -38,31 +38,41 @@ export class OpenRouterService implements StructuredLlmService {
   private static readonly BACKSPACE_HEX_GARBAGE_REGEX = /\u0008[0-9a-f]/gi;
 
   constructor() {
-    this.maxAttempts = Number(process.env.OPENROUTER_MAX_ATTEMPTS ?? 3);
-    this.baseRetryDelayMs = Number(process.env.OPENROUTER_RETRY_DELAY_MS ?? 2000);
+    this.maxAttempts = Number(config.maxAttempts ?? 3);
+    this.baseRetryDelayMs = Number(config.baseRetryDelayMs ?? 2000);
 
     this.llmClient = new ChatOpenAI({
       apiKey: config.openrouterKey,
       modelName: config.models[0],
       temperature: config.temperature,
-      maxRetries: 2,
+      maxTokens: config.maxTokens,
+      maxRetries: config.maxAttempts,
       configuration: {
         baseURL: config.baseUrl,
         defaultHeaders: {
           'Referer': config.httpReferer,
           'X-Title': config.xTitle
         }
-      },
-      modelKwargs: {
-        models: config.models,
-        provider: config.provider,
-      },
+      }
     })
   }
 
   private isRateLimitError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes('429') || message.includes('MODEL_RATE_LIMIT') || message.includes('rate limit');
+  }
+
+  private isTruncatedJsonError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('Unterminated string in JSON')
+      || message.includes('Unexpected end of JSON input')
+      || message.includes('EOF while parsing');
+  }
+
+  private isInvalidImagePayloadError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('annotated_image_base64 is missing or invalid')
+      || message.includes('corrupted base64 image payload');
   }
 
   private async waitBeforeRetry(attempt: number): Promise<void> {
@@ -149,15 +159,21 @@ export class OpenRouterService implements StructuredLlmService {
     schema: z.ZodSchema,
     imageMimeType = 'image/png',
   ): Promise<StructuredLlmResult<Record<string, unknown>>> {
+    const compactRetrySuffix = ' IMPORTANT: keep JSON tiny and valid. Use max 384px longest side, JPEG quality 30, no data URL prefix, no extra keys, no extra text.';
+
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
+        const promptForAttempt = attempt === 1
+          ? userTextPrompt
+          : `${userTextPrompt}${compactRetrySuffix}`;
+
         const messages = [
           new SystemMessage(systemPrompt),
           new HumanMessage({
             content: [
               {
                 type: 'text',
-                text: userTextPrompt,
+                text: promptForAttempt,
               },
               {
                 type: 'image_url',
@@ -182,7 +198,12 @@ export class OpenRouterService implements StructuredLlmService {
           data,
         };
       } catch (error) {
-        const shouldRetry = this.isRateLimitError(error) && attempt < this.maxAttempts;
+        const shouldRetry = (
+          this.isRateLimitError(error)
+          || this.isTruncatedJsonError(error)
+          || this.isInvalidImagePayloadError(error)
+        )
+          && attempt < this.maxAttempts;
 
         if (shouldRetry) {
           await this.waitBeforeRetry(attempt);
