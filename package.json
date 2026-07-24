@@ -1,0 +1,25 @@
+{
+  "name": "tcc-identificacao-estruturas-vasculares",
+  "version": "1.0.0",
+  "description": "Este repositório contém um protótipo acadêmico de segmentação binária de estruturas vasculares em imagens de tecido tumoral. O fluxo converte anotações poligonais no formato COCO em máscaras, treina uma U-Net, registra a divisão dos dados no checkpoint e calcula Dice e IoU no subconjunto de validação.",
+  "main": "index.ts",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AmandaMNL/tcc-identificacao-estruturas-vasculares.git"
+  },
+  "keywords": [],
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/AmandaMNL/tcc-identificacao-estruturas-vasculares/issues"
+  },
+  "homepage": "https://github.com/AmandaMNL/tcc-identificacao-estruturas-vasculares#readme",
+  "dependencies": {
+    "@types/node": "^26.1.1"
+  }
+}
