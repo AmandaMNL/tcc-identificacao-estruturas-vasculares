@@ -4,7 +4,8 @@ const config = {
   httpReferer: process.env.OPENROUTER_HTTP_REFERER,
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
-    'google/gemini-3.1-flash-image'
+    // 'google/gemini-3.1-flash-image', // para img
+    'nex-agi/nex-n2-mini'
   ],
   provider: {
     sort: {
@@ -16,7 +17,7 @@ const config = {
   maxTokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 32000),
   topK: 1,
   defaultImagePath: '',
-  sendImageToLlm: true,
+  sendImageToLlm: false,
   maxAttempts: 3,
   baseRetryDelayMs: 2000,
 };

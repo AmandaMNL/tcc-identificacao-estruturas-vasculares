@@ -12,8 +12,11 @@ Os dados de origem estão disponíveis no EMBL-EBI:
 Organização local:
 
 - `annotations/COCO_annotations.json`: anotações poligonais no formato COCO.
-- `annotations/DCIS.Patient_001.2.json`: manifesto das imagens locais do paciente identificado no conjunto como `Patient_001`.
-- `images/`: dez imagens RGB com contornos de anotação incorporados aos pixels.
-- `mask/`: máscaras binárias geradas pelo código deste projeto a partir das categorias vasculares do COCO.
+- `annotations/DCIS/Patient_001/DCIS.Patient_001.2.json`: manifesto das imagens locais do paciente identificado no conjunto como `Patient_001`.
+- `annotations/DCIS/Patient_00N/`: diretórios por paciente, espelhando a organização de `imagesRaw/`.
+- `images/DCIS/Patient_00N/`: imagens RGB com marcação incorporada, separadas por paciente.
+- `mask/DCIS/Patient_00N/`: máscaras binárias geradas pelo código deste projeto, também separadas por paciente.
+
+As pastas `images/`, `mask/` e `annotations/DCIS/` seguem a mesma hierarquia por paciente já usada em `imagesRaw/`. Nesta amostra local, somente `Patient_001` possui arquivos derivados, enquanto os demais diretórios já foram preparados para receber novos dados do conjunto.
 
 Os identificadores usados nesta pasta são os identificadores pseudonimizados já fornecidos pelo conjunto público. A presença de licença aberta não transforma o protótipo em ferramenta clínica e não elimina as limitações metodológicas descritas no README principal.

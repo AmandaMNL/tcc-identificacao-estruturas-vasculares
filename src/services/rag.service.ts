@@ -1,6 +1,10 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import neo4j from 'neo4j-driver';
+import sharp from 'sharp';
 import { Neo4jService } from './neo4j.service.ts';
 import type { ImageSignature } from './image.signature.ts';
+import type { PromptReferenceImage } from './openrouter.service.ts';
 
 type Neo4jImageNode = {
   id: number | string;
@@ -44,7 +48,77 @@ export type RagContextResult = {
   tile: Neo4jTileNode | null;
   topCategories: CategorySummary[];
   topAnnotations: AnnotationSample[];
+  referenceImages: PromptReferenceImage[];
   promptContext: string;
+};
+
+type ArtifactDescriptor = {
+  role: 'imageRaw' | 'imageAnnotated' | 'mask';
+  fileName: string;
+  resolvedPath: string;
+  mimeType: string;
+};
+
+type ArtifactBundle = {
+  imageRaw: ArtifactDescriptor | null;
+  imageAnnotated: ArtifactDescriptor | null;
+  mask: ArtifactDescriptor | null;
+  annotationManifestPath: string | null;
+};
+
+const ROOT = process.cwd();
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+};
+
+const toMimeType = (filePath: string): string => MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? 'image/png';
+
+const compactImageForPrompt = async (filePath: string, role: ArtifactDescriptor['role']): Promise<PromptReferenceImage> => {
+  const isMask = role === 'mask';
+  const transformed = isMask
+    ? await sharp(filePath).resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    : await sharp(filePath).resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 65, progressive: true }).toBuffer();
+
+  return {
+    label: role,
+    base64: transformed.toString('base64'),
+    mimeType: isMask ? 'image/png' : 'image/jpeg',
+  };
+};
+
+const resolveArtifactBundle = (fileName: string): ArtifactBundle => {
+  const normalizedFileName = fileName.replaceAll('\\', '/');
+  const ext = path.extname(normalizedFileName) || '.png';
+  const baseName = path.basename(normalizedFileName, ext);
+  const patientFolder = path.basename(path.dirname(normalizedFileName));
+  const cohortName = normalizedFileName.split('/')[0] ?? 'DCIS';
+  const rawPath = path.resolve(ROOT, 'data/imagesRaw', normalizedFileName);
+  const annotatedPath = path.resolve(ROOT, 'data/images', path.dirname(normalizedFileName), `${baseName}_rgb_labels.png`);
+  const maskPath = path.resolve(ROOT, 'data/mask', path.dirname(normalizedFileName), `${baseName}_rgb_labels.png`);
+  const annotationManifestPath = path.resolve(ROOT, 'data/annotations', cohortName, patientFolder, `${cohortName}.${patientFolder}.2.json`);
+
+  const toDescriptor = (role: ArtifactDescriptor['role'], resolvedPath: string, derivedFileName: string): ArtifactDescriptor | null => {
+    if (!existsSync(resolvedPath)) {
+      return null;
+    }
+
+    return {
+      role,
+      fileName: derivedFileName,
+      resolvedPath,
+      mimeType: toMimeType(resolvedPath),
+    };
+  };
+
+  return {
+    imageRaw: toDescriptor('imageRaw', rawPath, normalizedFileName),
+    imageAnnotated: toDescriptor('imageAnnotated', annotatedPath, `${baseName}_rgb_labels.png`),
+    mask: toDescriptor('mask', maskPath, `${baseName}_rgb_labels.png`),
+    annotationManifestPath: existsSync(annotationManifestPath) ? annotationManifestPath : null,
+  };
 };
 
 type NearbyImageSample = {
@@ -54,6 +128,14 @@ type NearbyImageSample = {
   globalX: number;
   globalY: number;
   spatialDistance: number;
+};
+
+type VisualCandidateSample = {
+  imageId: number | string;
+  fileName: string;
+  visualDistance: number;
+  annotationCount: number;
+  hasTile: boolean;
 };
 
 function asNumber(value: unknown): number {
@@ -130,6 +212,7 @@ export class RagService {
   async getImageContext(imageSignature: string, topK = 3): Promise<RagContextResult> {
     const limitedTopK = clampTopK(topK);
     const neighborLimit = Math.max(3, limitedTopK * 3);
+    const visualCandidateLimit = Math.max(5, limitedTopK * 4);
     if (!imageSignature?.trim()) {
       throw new Error('imageSignature is required for proximity retrieval.');
     }
@@ -165,8 +248,16 @@ export class RagService {
                abs(coalesce(i.sig_mean, 0) - $sig_mean) * 0.25 +
                abs(coalesce(i.sig_std, 0) - $sig_std) * 0.25 AS visualDistance
           OPTIONAL MATCH (t:Tile)-[:REFERS_TO_IMAGE]->(i)
-          RETURN i, t, visualDistance
-          ORDER BY visualDistance ASC, i.id ASC
+          WITH i, t, visualDistance
+          OPTIONAL MATCH (a:Annotation)-[:BELONGS_TO_IMAGE]->(i)
+          WITH i, t, visualDistance, count(a) AS annotationCount
+          RETURN i, t, visualDistance, annotationCount
+          ORDER BY
+            CASE WHEN annotationCount > 0 THEN 0 ELSE 1 END ASC,
+            CASE WHEN t IS NOT NULL THEN 0 ELSE 1 END ASC,
+            visualDistance ASC,
+            annotationCount DESC,
+            i.id ASC
           LIMIT 1
           `,
           {
@@ -195,12 +286,11 @@ export class RagService {
       }
 
       const imageNode = imageValue.properties as Record<string, unknown>;
+      const matchedFileName = String(imageNode.file_name ?? '');
       const tileValue = firstRecord.get('t');
       const tileNode = tileValue?.properties as Record<string, unknown> | undefined;
       const visualDistance = asNumber(firstRecord.get('visualDistance'));
-      const resolvedImageId = neo4j.isInt(imageNode.id)
-        ? imageNode.id
-        : neo4j.int(asNumber(imageNode.id));
+      const annotationCount = asNumber(firstRecord.get('annotationCount'));
       const anchorX = tileNode?.global_x === undefined || tileNode?.global_x === null
         ? null
         : asNumber(tileNode.global_x);
@@ -211,7 +301,7 @@ export class RagService {
       const topCategoriesResult = await session.executeRead((tx) =>
         tx.run(
           `
-          MATCH (i:Image {id: $imageId})
+          MATCH (i:Image {file_name: $fileName})
           MATCH (a:Annotation)-[:BELONGS_TO_IMAGE]->(i)
           MATCH (a)-[:HAS_CATEGORY]->(c:Category)
           RETURN
@@ -222,14 +312,14 @@ export class RagService {
           ORDER BY annotationCount DESC, totalArea DESC
           LIMIT $topK
           `,
-          { imageId: resolvedImageId, topK: neo4j.int(limitedTopK) },
+          { fileName: matchedFileName, topK: neo4j.int(limitedTopK) },
         ),
       );
 
       const topAnnotationsResult = await session.executeRead((tx) =>
         tx.run(
           `
-          MATCH (i:Image {id: $imageId})
+          MATCH (i:Image {file_name: $fileName})
           MATCH (a:Annotation)-[:BELONGS_TO_IMAGE]->(i)
           MATCH (a)-[:HAS_CATEGORY]->(c:Category)
           RETURN
@@ -242,7 +332,66 @@ export class RagService {
           ORDER BY area DESC
           LIMIT $topK
           `,
-          { imageId: resolvedImageId, topK: neo4j.int(limitedTopK) },
+          { fileName: matchedFileName, topK: neo4j.int(limitedTopK) },
+        ),
+      );
+
+      const visualCandidatesResult = await session.executeRead((tx) =>
+        tx.run(
+          `
+          MATCH (i:Image)
+          WHERE i.sig_m0 IS NOT NULL
+            AND i.sig_m1 IS NOT NULL
+            AND i.sig_m2 IS NOT NULL
+            AND i.sig_m3 IS NOT NULL
+            AND i.sig_m4 IS NOT NULL
+            AND i.sig_m5 IS NOT NULL
+            AND i.sig_m6 IS NOT NULL
+            AND i.sig_m7 IS NOT NULL
+          WITH i,
+               sqrt(
+                 ((coalesce(i.sig_m0, 0) - $sig_m0) * (coalesce(i.sig_m0, 0) - $sig_m0)) +
+                 ((coalesce(i.sig_m1, 0) - $sig_m1) * (coalesce(i.sig_m1, 0) - $sig_m1)) +
+                 ((coalesce(i.sig_m2, 0) - $sig_m2) * (coalesce(i.sig_m2, 0) - $sig_m2)) +
+                 ((coalesce(i.sig_m3, 0) - $sig_m3) * (coalesce(i.sig_m3, 0) - $sig_m3)) +
+                 ((coalesce(i.sig_m4, 0) - $sig_m4) * (coalesce(i.sig_m4, 0) - $sig_m4)) +
+                 ((coalesce(i.sig_m5, 0) - $sig_m5) * (coalesce(i.sig_m5, 0) - $sig_m5)) +
+                 ((coalesce(i.sig_m6, 0) - $sig_m6) * (coalesce(i.sig_m6, 0) - $sig_m6)) +
+                 ((coalesce(i.sig_m7, 0) - $sig_m7) * (coalesce(i.sig_m7, 0) - $sig_m7))
+               ) +
+               abs(coalesce(i.sig_mean, 0) - $sig_mean) * 0.25 +
+               abs(coalesce(i.sig_std, 0) - $sig_std) * 0.25 AS visualDistance
+          OPTIONAL MATCH (t:Tile)-[:REFERS_TO_IMAGE]->(i)
+          WITH i, t, visualDistance
+          OPTIONAL MATCH (a:Annotation)-[:BELONGS_TO_IMAGE]->(i)
+          WITH i, t, visualDistance, count(a) AS annotationCount
+          RETURN
+            i.id AS imageId,
+            i.file_name AS fileName,
+            visualDistance,
+            annotationCount,
+            t IS NOT NULL AS hasTile
+          ORDER BY
+            CASE WHEN annotationCount > 0 THEN 0 ELSE 1 END ASC,
+            CASE WHEN t IS NOT NULL THEN 0 ELSE 1 END ASC,
+            visualDistance ASC,
+            annotationCount DESC,
+            i.id ASC
+          LIMIT $visualCandidateLimit
+          `,
+          {
+            sig_m0: signature.bands[0] ?? 0,
+            sig_m1: signature.bands[1] ?? 0,
+            sig_m2: signature.bands[2] ?? 0,
+            sig_m3: signature.bands[3] ?? 0,
+            sig_m4: signature.bands[4] ?? 0,
+            sig_m5: signature.bands[5] ?? 0,
+            sig_m6: signature.bands[6] ?? 0,
+            sig_m7: signature.bands[7] ?? 0,
+            sig_mean: signature.mean,
+            sig_std: signature.std,
+            visualCandidateLimit: neo4j.int(visualCandidateLimit),
+          },
         ),
       );
 
@@ -323,21 +472,48 @@ export class RagService {
         spatialDistance: asNumber(record.get('spatialDistance')),
       }));
 
+      const visualCandidates: VisualCandidateSample[] = visualCandidatesResult.records.map((record) => ({
+        imageId: asPreciseInteger(record.get('imageId')),
+        fileName: String(record.get('fileName') ?? ''),
+        visualDistance: asNumber(record.get('visualDistance')),
+        annotationCount: asNumber(record.get('annotationCount')),
+        hasTile: Boolean(record.get('hasTile')),
+      }));
+
+      const artifacts = resolveArtifactBundle(image.file_name);
+      const referenceImages = (await Promise.all(
+        [artifacts.imageRaw, artifacts.imageAnnotated, artifacts.mask]
+          .filter((artifact): artifact is ArtifactDescriptor => artifact !== null)
+          .map((artifact) => compactImageForPrompt(artifact.resolvedPath, artifact.role)),
+      ));
+      const annotationManifestText = artifacts.annotationManifestPath
+        ? readFileSync(artifacts.annotationManifestPath, 'utf-8')
+        : null;
+
       const promptContext = JSON.stringify(
         {
           retrieval: {
             strategy: 'visual_signature_plus_spatial_proximity',
             input_signature: signature,
             matched_visual_distance: visualDistance,
+            matched_annotation_count: annotationCount,
             anchor_coordinates: {
               global_x: anchorX,
               global_y: anchorY,
             },
+            visual_candidates: visualCandidates,
             nearby_images: nearbyImages,
           },
           file_name: image.file_name,
           image,
           tile,
+          artifacts: {
+            image_raw: artifacts.imageRaw,
+            image_annotated: artifacts.imageAnnotated,
+            mask: artifacts.mask,
+            annotation_manifest_path: artifacts.annotationManifestPath,
+            annotation_manifest_json: annotationManifestText,
+          },
           top_categories: topCategories,
           top_annotations: topAnnotations,
         },
@@ -351,6 +527,7 @@ export class RagService {
         tile,
         topCategories,
         topAnnotations,
+        referenceImages,
         promptContext,
       };
     } catch (error) {

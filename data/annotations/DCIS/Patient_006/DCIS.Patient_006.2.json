@@ -1,0 +1,32 @@
+[
+  {
+    "file_name": "1.png",
+    "height": 920,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 1,
+    "global_x": 6468,
+    "global_y": 10759,
+    "id": 5487130751910128000
+  },
+  {
+    "file_name": "10.png",
+    "height": 913,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 10,
+    "global_x": 11462,
+    "global_y": 8694,
+    "id": 8396201581875667000
+  },
+  {
+    "file_name": "15.png",
+    "height": 917,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 15,
+    "global_x": 10622,
+    "global_y": 6253,
+    "id": 5703863951437855000
+  }
+]

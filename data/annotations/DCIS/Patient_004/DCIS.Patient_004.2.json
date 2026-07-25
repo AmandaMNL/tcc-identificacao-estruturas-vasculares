@@ -1,0 +1,102 @@
+[
+  {
+    "file_name": "1.png",
+    "height": 915,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 1,
+    "global_x": 8611,
+    "global_y": 2578,
+    "id": 8444242683568781000
+  },
+  {
+    "file_name": "2.png",
+    "height": 931,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 2,
+    "global_x": 6514,
+    "global_y": 8085,
+    "id": 3232052597226396000
+  },
+  {
+    "file_name": "3.png",
+    "height": 922,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 3,
+    "global_x": 6782,
+    "global_y": 9831,
+    "id": 3709013291996886000
+  },
+  {
+    "file_name": "4.png",
+    "height": 911,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 4,
+    "global_x": 6474,
+    "global_y": 13166,
+    "id": 5098665116619250000
+  },
+  {
+    "file_name": "5.png",
+    "height": 920,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 5,
+    "global_x": 6453,
+    "global_y": 14251,
+    "id": 1356195380169215700
+  },
+  {
+    "file_name": "6.png",
+    "height": 928,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 6,
+    "global_x": 3844,
+    "global_y": 13770,
+    "id": 2262739168402708500
+  },
+  {
+    "file_name": "7.png",
+    "height": 930,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 7,
+    "global_x": 3126,
+    "global_y": 12433,
+    "id": 3261558680057125000
+  },
+  {
+    "file_name": "8.png",
+    "height": 923,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 8,
+    "global_x": 3663,
+    "global_y": 9014,
+    "id": 4102459568797486000
+  },
+  {
+    "file_name": "9.png",
+    "height": 927,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 9,
+    "global_x": 2211,
+    "global_y": 10151,
+    "id": 7555450512102587000
+  },
+  {
+    "file_name": "10.png",
+    "height": 920,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 10,
+    "global_x": 5838,
+    "global_y": 6108,
+    "id": 9124759513147510000
+  }
+]

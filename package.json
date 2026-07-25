@@ -12,6 +12,7 @@
     "neo4j:up": "docker compose up -d",
     "neo4j:down": "docker compose down",
     "neo4j:seed": "node --env-file=.env --import tsx src/services/seed.ts",
+    "data:prepare": "node --import tsx src/scripts/prepare.data.ts",
     "analyze:image": "node --env-file=.env --import tsx src/index.ts",
     "analyze:image:debug": "node --inspect --env-file=.env --import tsx src/index.ts",
     "langgraph:serve": "npx @langchain/langgraph-cli@latest dev"
@@ -37,7 +38,8 @@
     "@langchain/langgraph": "^1.4.8",
     "@langchain/openai": "^1.5.5",
     "langchain": "^1.5.3",
-    "neo4j-driver": "^6.2.0"
+    "neo4j-driver": "^6.2.0",
+    "sharp": "^0.35.3"
   },
   "engines": {
     "node": ">=26.0.0"

@@ -1,3 +1,5 @@
+import sharp from 'sharp';
+
 const SIGNATURE_BANDS = 8;
 
 export type ImageSignature = {
@@ -5,6 +7,13 @@ export type ImageSignature = {
   mean: number;
   std: number;
   bands: number[];
+};
+
+export type NormalizedImagePayload = {
+  base64: string;
+  mimeType: string;
+  width: number;
+  height: number;
 };
 
 const normalizeBase64 = (rawBase64: string): string => {
@@ -65,12 +74,69 @@ export const getImageSignatureFromBuffer = (buffer: Buffer, bands = SIGNATURE_BA
   };
 };
 
-export const getImageSignatureFromBase64 = (base64: string): ImageSignature => {
+const canonicalizeImageBuffer = async (buffer: Buffer): Promise<{ pngBuffer: Buffer; width: number; height: number }> => {
+  if (buffer.length === 0) {
+    throw new Error('Imagem vazia: nao foi possivel gerar assinatura visual.');
+  }
+
+  const image = sharp(buffer, { failOn: 'none' })
+    .rotate()
+    .removeAlpha()
+    .toColorspace('srgb');
+
+  const metadata = await image.metadata();
+  const width = metadata.width ?? 0;
+  const height = metadata.height ?? 0;
+
+  if (width <= 0 || height <= 0) {
+    throw new Error('Nao foi possivel normalizar a imagem para assinatura visual.');
+  }
+
+  return {
+    pngBuffer: await image.png().toBuffer(),
+    width,
+    height,
+  };
+};
+
+const getRawPixelBuffer = async (buffer: Buffer): Promise<Buffer> => {
+  return sharp(buffer, { failOn: 'none' })
+    .rotate()
+    .removeAlpha()
+    .toColorspace('srgb')
+    .raw()
+    .toBuffer();
+};
+
+export const normalizeImageBase64 = async (base64: string): Promise<NormalizedImagePayload> => {
   const normalized = normalizeBase64(base64);
 
   if (!normalized) {
     throw new Error('imageBase64 is required to generate visual signature.');
   }
 
-  return getImageSignatureFromBuffer(Buffer.from(normalized, 'base64'));
+  const sourceBuffer = Buffer.from(normalized, 'base64');
+  const { pngBuffer, width, height } = await canonicalizeImageBuffer(sourceBuffer);
+
+  return {
+    base64: pngBuffer.toString('base64'),
+    mimeType: 'image/png',
+    width,
+    height,
+  };
+};
+
+export const getImageSignatureFromImageBuffer = async (buffer: Buffer): Promise<ImageSignature> => {
+  const rawPixels = await getRawPixelBuffer(buffer);
+  return getImageSignatureFromBuffer(rawPixels);
+};
+
+export const getImageSignatureFromBase64 = async (base64: string): Promise<ImageSignature> => {
+  const normalized = normalizeBase64(base64);
+
+  if (!normalized) {
+    throw new Error('imageBase64 is required to generate visual signature.');
+  }
+
+  return getImageSignatureFromImageBuffer(Buffer.from(normalized, 'base64'));
 };

@@ -3,10 +3,20 @@ import config from '../config.ts';
 import { z } from 'zod';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
+type MultimodalContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export type LLMResponse = {
   model: string;
   content: string;
 }
+
+export type PromptReferenceImage = {
+  label: string;
+  base64: string;
+  mimeType: string;
+};
 
 type StructuredLlmResult<T> = {
   success: boolean;
@@ -26,6 +36,7 @@ export type StructuredLlmService = {
     imageBase64: string,
     schema: z.ZodSchema,
     imageMimeType?: string,
+    referenceImages?: PromptReferenceImage[],
   ): Promise<StructuredLlmResult<Record<string, unknown>>>;
 };
 
@@ -158,6 +169,7 @@ export class OpenRouterService implements StructuredLlmService {
     imageBase64: string,
     schema: z.ZodSchema,
     imageMimeType = 'image/png',
+    referenceImages: PromptReferenceImage[] = [],
   ): Promise<StructuredLlmResult<Record<string, unknown>>> {
     const compactRetrySuffix = ' IMPORTANT: keep JSON tiny and valid. Use max 384px longest side, JPEG quality 30, no data URL prefix, no extra keys, no extra text.';
 
@@ -167,21 +179,41 @@ export class OpenRouterService implements StructuredLlmService {
           ? userTextPrompt
           : `${userTextPrompt}${compactRetrySuffix}`;
 
+        const content: MultimodalContentPart[] = [
+          {
+            type: 'text',
+            text: promptForAttempt,
+          },
+        ];
+
+        for (const referenceImage of referenceImages) {
+          content.push({
+            type: 'text',
+            text: `Reference artifact: ${referenceImage.label}`,
+          });
+          content.push({
+            type: 'image_url',
+            image_url: {
+              url: `data:${referenceImage.mimeType};base64,${referenceImage.base64}`,
+            },
+          });
+        }
+
+        content.push({
+          type: 'text',
+          text: 'Query image to analyze.',
+        });
+        content.push({
+          type: 'image_url',
+          image_url: {
+            url: `data:${imageMimeType};base64,${imageBase64}`,
+          },
+        });
+
         const messages = [
           new SystemMessage(systemPrompt),
           new HumanMessage({
-            content: [
-              {
-                type: 'text',
-                text: promptForAttempt,
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:${imageMimeType};base64,${imageBase64}`,
-                },
-              },
-            ],
+            content,
           }),
         ];
 

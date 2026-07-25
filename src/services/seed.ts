@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Session } from 'neo4j-driver';
 import { ImageSeedTransformService } from './image.seed.transform.ts';
 import { Neo4jService } from './neo4j.service.ts';
-import { getImageSignatureFromBuffer } from './image.signature.ts';
+import { getImageSignatureFromImageBuffer } from './image.signature.ts';
 
 type CocoImage = {
   id: number;
@@ -48,10 +48,42 @@ type DcisEntry = {
 };
 
 const COCO_PATH = path.resolve(process.cwd(), 'data/annotations/COCO_annotations.json');
-const DCIS_PATH = path.resolve(process.cwd(), 'data/annotations/DCIS.Patient_001.2.json');
+const DCIS_PATH = path.resolve(process.cwd(), 'data/annotations/DCIS/Patient_001/DCIS.Patient_001.2.json');
+const IMAGES_ROOT = path.resolve(process.cwd(), 'data/images');
+const IMAGES_RAW_ROOT = path.resolve(process.cwd(), 'data/imagesRaw');
 
 const BATCH_SIZE = Number(process.env.NEO4J_SEED_BATCH_SIZE ?? 300);
 const CLEAR_EXISTING = (process.env.NEO4J_SEED_CLEAR ?? 'false').toLowerCase() === 'true';
+
+const findUniqueImagePath = (rootPath: string, targetFileName: string): string | null => {
+  const matches: string[] = [];
+  const stack = [rootPath];
+
+  while (stack.length > 0) {
+    const currentPath = stack.pop();
+    if (!currentPath) {
+      continue;
+    }
+
+    for (const entry of readdirSync(currentPath, { withFileTypes: true })) {
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+        continue;
+      }
+
+      if (entry.isFile() && entry.name === targetFileName) {
+        matches.push(entryPath);
+      }
+    }
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`Imagem anotada ambigua para ${targetFileName}: ${matches.join(', ')}`);
+  }
+
+  return matches[0] ?? null;
+};
 
 const readJsonFile = <T,>(filePath: string): T => {
   const raw = readFileSync(filePath, 'utf-8');
@@ -59,7 +91,12 @@ const readJsonFile = <T,>(filePath: string): T => {
 };
 
 const resolveImageBinaryPath = (normalizedFileName: string): string | null => {
-  const candidateByName = path.resolve(process.cwd(), 'data/images', normalizedFileName);
+  const candidateRaw = path.resolve(IMAGES_RAW_ROOT, normalizedFileName);
+  if (existsSync(candidateRaw)) {
+    return candidateRaw;
+  }
+
+  const candidateByName = path.resolve(IMAGES_ROOT, normalizedFileName);
   if (existsSync(candidateByName)) {
     return candidateByName;
   }
@@ -67,9 +104,13 @@ const resolveImageBinaryPath = (normalizedFileName: string): string | null => {
   const ext = path.extname(normalizedFileName) || '.png';
   const base = path.basename(normalizedFileName, ext);
   const fallbackName = `${base}_rgb_labels${ext}`;
-  const candidateByFallback = path.resolve(process.cwd(), 'data/images', fallbackName);
+  const candidateByFallback = path.resolve(IMAGES_ROOT, path.dirname(normalizedFileName), fallbackName);
 
-  return existsSync(candidateByFallback) ? candidateByFallback : null;
+  if (existsSync(candidateByFallback)) {
+    return candidateByFallback;
+  }
+
+  return findUniqueImagePath(IMAGES_ROOT, fallbackName);
 };
 
 const createConstraints = async (neo4jService: Neo4jService, session: Session) => {
@@ -117,7 +158,7 @@ const main = async () => {
       { batchSize: BATCH_SIZE, label: 'categorias' },
     );
 
-    const imageRows = coco.images.map((image) => {
+    const imageRows = await Promise.all(coco.images.map(async (image) => {
       const row = imageSeedTransformService.toSeedImageRow(image);
       const imageBinaryPath = resolveImageBinaryPath(row.file_name);
 
@@ -138,7 +179,7 @@ const main = async () => {
         };
       }
 
-      const signature = getImageSignatureFromBuffer(readFileSync(imageBinaryPath));
+      const signature = await getImageSignatureFromImageBuffer(readFileSync(imageBinaryPath));
 
       return {
         ...row,
@@ -154,7 +195,7 @@ const main = async () => {
         sig_m6: signature.bands[6] ?? null,
         sig_m7: signature.bands[7] ?? null,
       };
-    });
+    }));
 
     await neo4jService.runBatched(
       session,

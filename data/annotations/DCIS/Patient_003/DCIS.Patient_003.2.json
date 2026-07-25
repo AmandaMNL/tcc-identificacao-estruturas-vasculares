@@ -1,0 +1,132 @@
+[
+  {
+    "file_name": "4.png",
+    "height": 913,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 4,
+    "global_x": 9865,
+    "global_y": 2414,
+    "id": 2199311332750451200
+  },
+  {
+    "file_name": "13.png",
+    "height": 915,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 13,
+    "global_x": 3783,
+    "global_y": 5192,
+    "id": 6551718523282780000
+  },
+  {
+    "file_name": "25.png",
+    "height": 919,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 25,
+    "global_x": 3714,
+    "global_y": 8874,
+    "id": 1262102992066380800
+  },
+  {
+    "file_name": "35.png",
+    "height": 919,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 35,
+    "global_x": 4980,
+    "global_y": 12873,
+    "id": 1769867669882029600
+  },
+  {
+    "file_name": "52.png",
+    "height": 920,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 52,
+    "global_x": 16239,
+    "global_y": 12534,
+    "id": 7265832526717092000
+  },
+  {
+    "file_name": "76.png",
+    "height": 929,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 76,
+    "global_x": 7630,
+    "global_y": 16726,
+    "id": 5726993213428489000
+  },
+  {
+    "file_name": "89.png",
+    "height": 916,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 89,
+    "global_x": 15715,
+    "global_y": 20292,
+    "id": 5736986722839484000
+  },
+  {
+    "file_name": "103.png",
+    "height": 915,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 103,
+    "global_x": 13019,
+    "global_y": 23077,
+    "id": 5174679319131566000
+  },
+  {
+    "file_name": "115.png",
+    "height": 916,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 115,
+    "global_x": 18501,
+    "global_y": 27201,
+    "id": 6784628574419713000
+  },
+  {
+    "file_name": "139.png",
+    "height": 911,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 139,
+    "global_x": 12924,
+    "global_y": 33160,
+    "id": 5727468569898325000
+  },
+  {
+    "file_name": "142.png",
+    "height": 913,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 142,
+    "global_x": 21199,
+    "global_y": 34617,
+    "id": 3157414692113074700
+  },
+  {
+    "file_name": "162.png",
+    "height": 917,
+    "width": 1934,
+    "mpp": 0.5,
+    "key": 162,
+    "global_x": 16248,
+    "global_y": 40730,
+    "id": 6414047376148258000
+  },
+  {
+    "file_name": "165.png",
+    "height": 920,
+    "width": 1933,
+    "mpp": 0.5,
+    "key": 165,
+    "global_x": 20218,
+    "global_y": 41294,
+    "id": 8305163425946058000
+  }
+]
