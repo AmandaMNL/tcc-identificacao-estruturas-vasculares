@@ -41,7 +41,7 @@ export function buildGraph(
   dependencies: GraphDependencies,
 ) {
   const sendImageToLlm = dependencies.sendImageToLlm ?? config.sendImageToLlm;
-  const receivedImage = dependencies.receivedImage ?? config.receviedImage;
+  const receivedImage = dependencies.receivedImage ?? config.receivedImage;
 
   const routeAfterLlmResponse = (state: GraphState) => {
     if (state.responseError?.trim()) {
