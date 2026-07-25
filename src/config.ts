@@ -5,11 +5,12 @@ const config = {
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
     'google/gemini-3.1-flash-image', // para img
+    // 'google/gemini-3.1-flash-image', // para img
     // 'openai/gpt-5.4-image-2', // para img
     // 'nex-agi/nex-n2-mini', // para txt
     // 'nvidia/nemotron-3-ultra-550b-a55b', // para txt
   ],
-  temperature: 0.4,
+  temperature: 0.5,
   maxTokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 32000),
   topK: 5,
   defaultImagePath: '',
