@@ -34,19 +34,21 @@ export type GraphDependencies = {
   imageAnnotatorService: ImageAnnotatorService;
   topK?: number;
   sendImageToLlm?: boolean;
+  receivedImage?: boolean;
 };
 
 export function buildGraph(
   dependencies: GraphDependencies,
 ) {
   const sendImageToLlm = dependencies.sendImageToLlm ?? config.sendImageToLlm;
+  const receivedImage = dependencies.receivedImage ?? config.receviedImage;
 
   const routeAfterLlmResponse = (state: GraphState) => {
     if (state.responseError?.trim()) {
       return 'response';
     }
 
-    return sendImageToLlm ? 'saveResult' : 'applyOverlay';
+    return receivedImage ? 'saveResult' : 'applyOverlay';
   };
 
   const workflow = new StateGraph({
@@ -58,6 +60,7 @@ export function buildGraph(
       llmClient: dependencies.llmClient,
       ragService: dependencies.ragService,
       sendImageToLlm,
+      receivedImage,
     }))
     .addNode('applyOverlay', applyOverlay({
       imageAnnotatorService: dependencies.imageAnnotatorService,

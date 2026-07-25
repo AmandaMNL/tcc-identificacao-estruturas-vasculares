@@ -101,6 +101,7 @@ test('graph should process image and prompt and return llmResponse', async () =>
     ragService: mockRagService as RagService,
     imageAnnotatorService: mockImageAnnotatorService as ImageAnnotatorService,
     sendImageToLlm: true,
+    receivedImage: false,
   });
 
   const result = await graph.invoke({
@@ -130,6 +131,7 @@ test('graph should accept base64-only input for proximity RAG retrieval', async 
     ragService: mockRagService as RagService,
     imageAnnotatorService: mockImageAnnotatorService as ImageAnnotatorService,
     sendImageToLlm: true,
+    receivedImage: false,
   });
 
   const result = await graph.invoke({
@@ -157,6 +159,7 @@ test('graph should skip overlay and saveResult path when llm response fails', as
     ragService: mockRagService as RagService,
     imageAnnotatorService: mockImageAnnotatorService as ImageAnnotatorService,
     sendImageToLlm: true,
+    receivedImage: false,
   });
 
   const result = await graph.invoke({

@@ -179,10 +179,13 @@ export class ImageAnnotatorService {
 
         const fillOpacity = (0.18 + (confidence * 0.18)).toFixed(2);
         const anchor = anchorPointForContour(normalizedContour, width, height) ?? { x: 0, y: 0 };
+        const labelText = escapeXml(`${structure.label ?? 'vessel'} ${confidence.toFixed(2)}`);
 
         return `
           <g>
             <polygon points="${polygonPoints}" fill="${stroke}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" data-confidence="${confidence.toFixed(2)}" />
+            <rect x="${anchor.x}" y="${Math.max(0, anchor.y - 18)}" width="180" height="20" rx="4" fill="rgba(0,0,0,0.55)" />
+            <text x="${anchor.x + 5}" y="${Math.max(12, anchor.y - 4)}" fill="#ffffff" font-size="12" font-family="sans-serif">${labelText}</text>
           </g>
         `;
       })

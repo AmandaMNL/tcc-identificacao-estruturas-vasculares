@@ -59,6 +59,7 @@ export const getSystemPrompt = () => {
 
 type UserPromptOptions = {
   sendImageToLlm: boolean;
+  receivedImage: boolean;
   imageWidth: number;
   imageHeight: number;
 };
@@ -66,9 +67,13 @@ type UserPromptOptions = {
 export const getUserPromptTemplate = (imageContext: string, options: UserPromptOptions) => {
   const coordinateInstruction = `As coordenadas devem estar no espaco de pixels da imagem consultada, com origem no canto superior esquerdo, largura ${options.imageWidth} e altura ${options.imageHeight}. Nao use a escala, a posicao ou as coordenadas das imagens de referencia. Use as referencias apenas para comparar morfologia e padroes visuais.`;
   const annotatedImageInstruction = `Gere a imagem anotada diretamente e devolva-a em base64 no campo annotated_image_base64. Nao retorne pontos, poligonos ou overlay local. A imagem deve refletir a mesma area, escala e posicao da imagem consultada, com anotacoes visuais sobre as estruturas vasculares encontradas.`;
-  const question = options.sendImageToLlm
+  const contourResponseInstruction = `Responda SOMENTE em JSON compacto com este formato: {"summary":"...","has_vascular_structures":true,"image_width":${options.imageWidth},"image_height":${options.imageHeight},"vascular_structures":[{"id":null,"label":"not dilated vessel","confidence":0.0,"contour_points":[{"x":0,"y":0}]}],"tumor_boundaries":[{"x":0,"y":0}]}. O campo summary e obrigatorio e deve resumir os principais achados. image_width e image_height sao obrigatorios e devem repetir exatamente a largura e a altura da imagem consultada. Use em label categorias do dataset quando aplicavel, como not dilated vessel, Intermediately dilated vessel, highly dilated vessel ou CCL21+. Cada vascular_structure deve trazer contour_points com varios pontos x/y descrevendo o contorno; use ao menos 3 pontos quando houver area visivel. Sem texto extra fora do JSON. Se nao houver estruturas vasculares, retorne vascular_structures vazio, tumor_boundaries vazio e has_vascular_structures=false.`;
+
+  const question = options.receivedImage
     ? `Identifique as estruturas vasculares presentes na imagem consultada usando como apoio o contexto RAG e as imagens de referencia recuperadas. ${coordinateInstruction} ${annotatedImageInstruction} Responda SOMENTE em JSON compacto com este formato: {"summary":"...","has_vascular_structures":true,"image_width":${options.imageWidth},"image_height":${options.imageHeight},"annotated_image_base64":"..."}. O campo summary e obrigatorio e deve resumir os principais achados. image_width e image_height sao obrigatorios e devem repetir exatamente a largura e a altura da imagem consultada. annotated_image_base64 deve conter a imagem final anotada em base64, sem prefixo data URL. Use as referencias apenas como apoio visual e mantenha a anotacao sobre a imagem consultada. Se nao houver estruturas vasculares, ainda retorne a imagem consultada anotada com indicacao de ausencia ou com anotacao minima apropriada.`
-    : `Identifique as estruturas vasculares presentes na imagem com base no contexto RAG disponivel. ${coordinateInstruction} Responda SOMENTE em JSON compacto com este formato: {"summary":"...","has_vascular_structures":true,"image_width":${options.imageWidth},"image_height":${options.imageHeight},"vascular_structures":[{"id":null,"label":"not dilated vessel","confidence":0.0,"contour_points":[{"x":0,"y":0}]}],"tumor_boundaries":[{"x":0,"y":0}]}. O campo summary e obrigatorio e deve resumir os principais achados. image_width e image_height sao obrigatorios e devem repetir exatamente a largura e a altura da imagem consultada. Use em label categorias do dataset quando aplicavel, como not dilated vessel, Intermediately dilated vessel, highly dilated vessel ou CCL21+. Cada vascular_structure deve trazer contour_points com varios pontos x/y descrevendo o contorno; use ao menos 3 pontos quando houver area visivel. Sempre retorne as coordenadas de vascular_structures e tumor_boundaries (quando houver). Sem texto extra fora do JSON. Se nao houver estruturas vasculares, retorne vascular_structures vazio, tumor_boundaries vazio e has_vascular_structures=false.`;
+    : options.sendImageToLlm
+      ? `Identifique as estruturas vasculares presentes na imagem consultada usando como apoio o contexto RAG e as imagens de referencia recuperadas. ${coordinateInstruction} ${contourResponseInstruction}`
+      : `Identifique as estruturas vasculares presentes na imagem com base apenas no contexto RAG disponivel e no texto recuperado. ${coordinateInstruction} ${contourResponseInstruction}`;
 
   return JSON.stringify({
     role: 'professional lab technician',

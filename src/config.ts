@@ -5,8 +5,10 @@ const config = {
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
     // 'google/gemini-3.1-flash-image', // para img
-    'openai/gpt-5.4-image-2', // para img
-    // 'nex-agi/nex-n2-mini'
+    // 'openai/gpt-5.4-image-2', // para img
+    // 'nex-agi/nex-n2-mini', // para txt
+    // 'nvidia/nemotron-3-ultra-550b-a55b', // para txt
+    'openai/gpt-image-1-mini'
   ],
   provider: {
     sort: {
@@ -14,11 +16,12 @@ const config = {
       partition: "none"
     }
   },
-  temperature: 0.2,
+  temperature: 0.3,
   maxTokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 32000),
-  topK: 2,
+  topK: 5,
   defaultImagePath: '',
   sendImageToLlm: true,
+  receviedImage: true,
   maxAttempts: 3,
   baseRetryDelayMs: 2000,
 };

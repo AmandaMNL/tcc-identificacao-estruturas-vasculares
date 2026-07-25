@@ -37,6 +37,7 @@ type LlmResponseDependencies = {
   llmClient: StructuredLlmService;
   ragService: Pick<RagService, 'getImageContext'>;
   sendImageToLlm: boolean;
+  receivedImage: boolean;
 };
 
 export function llmResponse(dependencies: LlmResponseDependencies) {
@@ -48,14 +49,16 @@ export function llmResponse(dependencies: LlmResponseDependencies) {
       const ragContext = await dependencies.ragService.getImageContext(state.imageSignature, topK);
       const userPrompt = getUserPromptTemplate(ragContext.promptContext, {
         sendImageToLlm: dependencies.sendImageToLlm,
+        receivedImage: dependencies.receivedImage,
         imageWidth: state.imageWidth,
         imageHeight: state.imageHeight,
       });
-      const responseSchema = dependencies.sendImageToLlm
+      const responseSchema = dependencies.receivedImage
         ? annotatedImageResponseSchema
         : coordinatesResponseSchema;
 
-      const result = dependencies.sendImageToLlm
+      const shouldSendImage = dependencies.sendImageToLlm || dependencies.receivedImage;
+      const result = shouldSendImage
         ? await dependencies.llmClient.generateStructuredFromImage(
           systemPrompt,
           userPrompt,
