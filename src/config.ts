@@ -9,12 +9,6 @@ const config = {
     // 'nex-agi/nex-n2-mini', // para txt
     // 'nvidia/nemotron-3-ultra-550b-a55b', // para txt
   ],
-  provider: {
-    sort: {
-      by: "throughput",
-      partition: "none"
-    }
-  },
   temperature: 0.4,
   maxTokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 32000),
   topK: 5,
