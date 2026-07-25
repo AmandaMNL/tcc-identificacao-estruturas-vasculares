@@ -5,22 +5,23 @@ import type { RagService } from '../../services/rag.service.ts';
 import type { GraphState } from '../graph.ts';
 import config from '../../config.ts';
 
-const vascularStructureSchema = z.object({
-  id: z.string().nullable(),
-  label: z.string().min(1),
-  x: z.number(),
-  y: z.number(),
-  confidence: z.number().min(0).max(1),
-});
-
 const pointSchema = z.object({
   x: z.number(),
   y: z.number(),
 });
 
+const vascularStructureSchema = z.object({
+  id: z.union([z.string(), z.number()]).nullable(),
+  label: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+  contour_points: z.array(pointSchema).min(1),
+});
+
 const summarySchema = z.object({
   summary: z.string().min(1),
   has_vascular_structures: z.boolean(),
+  image_width: z.number().int().positive(),
+  image_height: z.number().int().positive(),
 });
 
 const coordinatesResponseSchema = summarySchema.extend({
@@ -28,13 +29,17 @@ const coordinatesResponseSchema = summarySchema.extend({
   tumor_boundaries: z.array(pointSchema),
 });
 
+const annotatedImageResponseSchema = summarySchema.extend({
+  annotated_image_base64: z.string().min(1),
+});
+
 type LlmResponseDependencies = {
   llmClient: StructuredLlmService;
   ragService: Pick<RagService, 'getImageContext'>;
+  sendImageToLlm: boolean;
 };
 
 export function llmResponse(dependencies: LlmResponseDependencies) {
-  const sendImageToLlm = config.sendImageToLlm;
   const topK = config.topK;
 
   return async (state: GraphState): Promise<Partial<GraphState>> => {
@@ -42,11 +47,15 @@ export function llmResponse(dependencies: LlmResponseDependencies) {
       const systemPrompt = getSystemPrompt();
       const ragContext = await dependencies.ragService.getImageContext(state.imageSignature, topK);
       const userPrompt = getUserPromptTemplate(ragContext.promptContext, {
-        sendImageToLlm,
+        sendImageToLlm: dependencies.sendImageToLlm,
+        imageWidth: state.imageWidth,
+        imageHeight: state.imageHeight,
       });
-      const responseSchema = coordinatesResponseSchema;
+      const responseSchema = dependencies.sendImageToLlm
+        ? annotatedImageResponseSchema
+        : coordinatesResponseSchema;
 
-      const result = sendImageToLlm
+      const result = dependencies.sendImageToLlm
         ? await dependencies.llmClient.generateStructuredFromImage(
           systemPrompt,
           userPrompt,

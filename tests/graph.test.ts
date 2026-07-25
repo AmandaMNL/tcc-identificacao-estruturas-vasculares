@@ -48,13 +48,19 @@ const mockLlmService = {
     success: true,
     data: {
       summary: 'Resumo objetivo dos achados vasculares.',
+      image_width: 1934,
+      image_height: 917,
       vascular_structures: [
         {
           id: 'v1',
           label: 'not dilated vessel',
-          x: 10,
-          y: 20,
           confidence: 0.92,
+          contour_points: [
+            { x: 8, y: 18 },
+            { x: 12, y: 18 },
+            { x: 12, y: 22 },
+            { x: 8, y: 22 },
+          ],
         },
       ],
       tumor_boundaries: [{ x: 5, y: 5 }],
@@ -66,16 +72,9 @@ const mockLlmService = {
     data: {
       summary: 'Resumo com imagem anotada.',
       has_vascular_structures: true,
-      vascular_structures: [
-        {
-          id: 'v1',
-          label: 'highly dilated vessel',
-          x: 12,
-          y: 16,
-          confidence: 0.88,
-        },
-      ],
-      tumor_boundaries: [{ x: 5, y: 5 }],
+      image_width: 1934,
+      image_height: 917,
+      annotated_image_base64: 'aW1hZ2VtLWFub3RhZGE=',
     },
   }),
 } as unknown as StructuredLlmService;
@@ -101,6 +100,7 @@ test('graph should process image and prompt and return llmResponse', async () =>
     llmClient: mockLlmService,
     ragService: mockRagService as RagService,
     imageAnnotatorService: mockImageAnnotatorService as ImageAnnotatorService,
+    sendImageToLlm: true,
   });
 
   const result = await graph.invoke({
@@ -116,15 +116,12 @@ test('graph should process image and prompt and return llmResponse', async () =>
   assert.equal(typeof parsedResponse.summary, 'string');
   assert.ok(parsedResponse.summary.length > 0);
   assert.equal(parsedResponse.has_vascular_structures, true);
+  assert.equal(parsedResponse.image_width, 1934);
+  assert.equal(parsedResponse.image_height, 917);
 
-  if (parsedResponse.annotated_image_base64) {
-    assert.equal(typeof parsedResponse.annotated_image_base64, 'string');
-    assert.ok(parsedResponse.annotated_image_base64.length > 0);
-  } else {
-    assert.equal(parsedResponse.vascular_structures[0].id, 'v1');
-    assert.equal(parsedResponse.vascular_structures[0].label.length > 0, true);
-    assert.equal(parsedResponse.tumor_boundaries[0].x, 5);
-  }
+  assert.equal(typeof parsedResponse.annotated_image_base64, 'string');
+  assert.ok(parsedResponse.annotated_image_base64.length > 0);
+  assert.equal(Boolean(result.responseJsonPath), true);
 });
 
 test('graph should accept base64-only input for proximity RAG retrieval', async () => {
@@ -132,6 +129,7 @@ test('graph should accept base64-only input for proximity RAG retrieval', async 
     llmClient: mockLlmService,
     ragService: mockRagService as RagService,
     imageAnnotatorService: mockImageAnnotatorService as ImageAnnotatorService,
+    sendImageToLlm: true,
   });
 
   const result = await graph.invoke({
@@ -146,13 +144,11 @@ test('graph should accept base64-only input for proximity RAG retrieval', async 
   const parsedResponse = JSON.parse(result.llmResponse);
   assert.equal(typeof parsedResponse.summary, 'string');
   assert.ok(parsedResponse.summary.length > 0);
+  assert.equal(parsedResponse.image_width, 1934);
+  assert.equal(parsedResponse.image_height, 917);
 
-  if (parsedResponse.annotated_image_base64) {
-    assert.equal(typeof parsedResponse.annotated_image_base64, 'string');
-    assert.ok(parsedResponse.annotated_image_base64.length > 0);
-  } else {
-    assert.equal(Array.isArray(parsedResponse.vascular_structures), true);
-  }
+  assert.equal(typeof parsedResponse.annotated_image_base64, 'string');
+  assert.ok(parsedResponse.annotated_image_base64.length > 0);
 });
 
 test('graph should skip overlay and saveResult path when llm response fails', async () => {
@@ -160,6 +156,7 @@ test('graph should skip overlay and saveResult path when llm response fails', as
     llmClient: failingLlmService,
     ragService: mockRagService as RagService,
     imageAnnotatorService: mockImageAnnotatorService as ImageAnnotatorService,
+    sendImageToLlm: true,
   });
 
   const result = await graph.invoke({
@@ -167,9 +164,9 @@ test('graph should skip overlay and saveResult path when llm response fails', as
     question: 'Identifique estruturas vasculares.',
   });
 
-  assert.equal(result.responseError, 'forced llm error');
+  assert.equal(result.responseError, 'forced llm image error');
   assert.equal(Boolean(result.responseImagePath), false);
 
   const parsedResponse = JSON.parse(result.llmResponse);
-  assert.equal(parsedResponse.error, 'forced llm error');
+  assert.equal(parsedResponse.error, 'forced llm image error');
 });

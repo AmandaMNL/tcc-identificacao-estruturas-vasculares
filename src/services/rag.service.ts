@@ -18,6 +18,8 @@ type Neo4jTileNode = {
   id: number | string;
   key?: number | string;
   file_name?: string;
+  local_patient_folder?: string;
+  local_relative_file_name?: string;
   width?: number;
   height?: number;
   mpp?: number;
@@ -89,15 +91,16 @@ const compactImageForPrompt = async (filePath: string, role: ArtifactDescriptor[
   };
 };
 
-const resolveArtifactBundle = (fileName: string): ArtifactBundle => {
+const resolveArtifactBundle = (fileName: string, tile: Neo4jTileNode | null): ArtifactBundle => {
   const normalizedFileName = fileName.replaceAll('\\', '/');
-  const ext = path.extname(normalizedFileName) || '.png';
-  const baseName = path.basename(normalizedFileName, ext);
-  const patientFolder = path.basename(path.dirname(normalizedFileName));
-  const cohortName = normalizedFileName.split('/')[0] ?? 'DCIS';
-  const rawPath = path.resolve(ROOT, 'data/imagesRaw', normalizedFileName);
-  const annotatedPath = path.resolve(ROOT, 'data/images', path.dirname(normalizedFileName), `${baseName}_rgb_labels.png`);
-  const maskPath = path.resolve(ROOT, 'data/mask', path.dirname(normalizedFileName), `${baseName}_rgb_labels.png`);
+  const localRelativeFileName = (tile?.local_relative_file_name ?? normalizedFileName).replaceAll('\\', '/');
+  const ext = path.extname(localRelativeFileName) || '.png';
+  const baseName = path.basename(localRelativeFileName, ext);
+  const patientFolder = tile?.local_patient_folder?.trim() || path.basename(path.dirname(localRelativeFileName));
+  const cohortName = localRelativeFileName.split('/')[0] ?? 'DCIS';
+  const rawPath = path.resolve(ROOT, 'data/imagesRaw', localRelativeFileName);
+  const annotatedPath = path.resolve(ROOT, 'data/images', path.dirname(localRelativeFileName), `${baseName}_rgb_labels.png`);
+  const maskPath = path.resolve(ROOT, 'data/mask', path.dirname(localRelativeFileName), `${baseName}_rgb_labels.png`);
   const annotationManifestPath = path.resolve(ROOT, 'data/annotations', cohortName, patientFolder, `${cohortName}.${patientFolder}.2.json`);
 
   const toDescriptor = (role: ArtifactDescriptor['role'], resolvedPath: string, derivedFileName: string): ArtifactDescriptor | null => {
@@ -248,11 +251,13 @@ export class RagService {
                abs(coalesce(i.sig_mean, 0) - $sig_mean) * 0.25 +
                abs(coalesce(i.sig_std, 0) - $sig_std) * 0.25 AS visualDistance
           OPTIONAL MATCH (t:Tile)-[:REFERS_TO_IMAGE]->(i)
-          WITH i, t, visualDistance
+          WITH i, t, visualDistance,
+               CASE WHEN t.local_relative_file_name IS NOT NULL THEN 1 ELSE 0 END AS hasLocalTile
           OPTIONAL MATCH (a:Annotation)-[:BELONGS_TO_IMAGE]->(i)
-          WITH i, t, visualDistance, count(a) AS annotationCount
+          WITH i, t, visualDistance, hasLocalTile, count(a) AS annotationCount
           RETURN i, t, visualDistance, annotationCount
           ORDER BY
+            CASE WHEN hasLocalTile = 1 THEN 0 ELSE 1 END ASC,
             CASE WHEN annotationCount > 0 THEN 0 ELSE 1 END ASC,
             CASE WHEN t IS NOT NULL THEN 0 ELSE 1 END ASC,
             visualDistance ASC,
@@ -362,16 +367,19 @@ export class RagService {
                abs(coalesce(i.sig_mean, 0) - $sig_mean) * 0.25 +
                abs(coalesce(i.sig_std, 0) - $sig_std) * 0.25 AS visualDistance
           OPTIONAL MATCH (t:Tile)-[:REFERS_TO_IMAGE]->(i)
-          WITH i, t, visualDistance
+          WITH i, t, visualDistance,
+               CASE WHEN t.local_relative_file_name IS NOT NULL THEN 1 ELSE 0 END AS hasLocalTile
           OPTIONAL MATCH (a:Annotation)-[:BELONGS_TO_IMAGE]->(i)
-          WITH i, t, visualDistance, count(a) AS annotationCount
+          WITH i, t, visualDistance, hasLocalTile, count(a) AS annotationCount
           RETURN
             i.id AS imageId,
             i.file_name AS fileName,
             visualDistance,
             annotationCount,
-            t IS NOT NULL AS hasTile
+            t IS NOT NULL AS hasTile,
+            hasLocalTile = 1 AS hasLocalTile
           ORDER BY
+            CASE WHEN hasLocalTile = 1 THEN 0 ELSE 1 END ASC,
             CASE WHEN annotationCount > 0 THEN 0 ELSE 1 END ASC,
             CASE WHEN t IS NOT NULL THEN 0 ELSE 1 END ASC,
             visualDistance ASC,
@@ -438,6 +446,8 @@ export class RagService {
           id: asPreciseInteger(tileNode.id),
           key: tileNode.key === undefined || tileNode.key === null ? undefined : asPreciseInteger(tileNode.key),
           file_name: tileNode.file_name ? String(tileNode.file_name) : undefined,
+          local_patient_folder: tileNode.local_patient_folder ? String(tileNode.local_patient_folder) : undefined,
+          local_relative_file_name: tileNode.local_relative_file_name ? String(tileNode.local_relative_file_name) : undefined,
           width: tileNode.width === undefined || tileNode.width === null ? undefined : asNumber(tileNode.width),
           height: tileNode.height === undefined || tileNode.height === null ? undefined : asNumber(tileNode.height),
           mpp: tileNode.mpp === undefined || tileNode.mpp === null ? undefined : Number(tileNode.mpp),
@@ -480,7 +490,7 @@ export class RagService {
         hasTile: Boolean(record.get('hasTile')),
       }));
 
-      const artifacts = resolveArtifactBundle(image.file_name);
+      const artifacts = resolveArtifactBundle(image.file_name, tile);
       const referenceImages = (await Promise.all(
         [artifacts.imageRaw, artifacts.imageAnnotated, artifacts.mask]
           .filter((artifact): artifact is ArtifactDescriptor => artifact !== null)

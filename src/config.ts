@@ -5,7 +5,8 @@ const config = {
   xTitle: process.env.OPENROUTER_X_TITLE,
   models: [
     // 'google/gemini-3.1-flash-image', // para img
-    'nex-agi/nex-n2-mini'
+    'openai/gpt-5.4-image-2', // para img
+    // 'nex-agi/nex-n2-mini'
   ],
   provider: {
     sort: {
@@ -15,9 +16,9 @@ const config = {
   },
   temperature: 0.2,
   maxTokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 32000),
-  topK: 1,
+  topK: 2,
   defaultImagePath: '',
-  sendImageToLlm: false,
+  sendImageToLlm: true,
   maxAttempts: 3,
   baseRetryDelayMs: 2000,
 };

@@ -17,6 +17,8 @@ export function processImage() {
     return {
       imageBase64,
       imageMimeType: normalizedImage.mimeType,
+      imageWidth: normalizedImage.width,
+      imageHeight: normalizedImage.height,
       imageSignature,
       content: '',
     };

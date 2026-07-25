@@ -47,21 +47,33 @@ type DcisEntry = {
   global_y?: number;
 };
 
+type LocalTileEntry = DcisEntry & {
+  local_patient_folder: string;
+  local_relative_file_name: string | null;
+};
+
 const COCO_PATH = path.resolve(process.cwd(), 'data/annotations/COCO_annotations.json');
-const DCIS_PATH = path.resolve(process.cwd(), 'data/annotations/DCIS/Patient_001/DCIS.Patient_001.2.json');
+const DCIS_ROOT = path.resolve(process.cwd(), 'data/annotations/DCIS');
 const IMAGES_ROOT = path.resolve(process.cwd(), 'data/images');
 const IMAGES_RAW_ROOT = path.resolve(process.cwd(), 'data/imagesRaw');
+const HELD_OUT_LOCAL_PATIENT_FOLDERS = new Set(['Patient_001']);
 
 const BATCH_SIZE = Number(process.env.NEO4J_SEED_BATCH_SIZE ?? 300);
 const CLEAR_EXISTING = (process.env.NEO4J_SEED_CLEAR ?? 'false').toLowerCase() === 'true';
+const imageSeedTransformService = new ImageSeedTransformService();
 
-const findUniqueImagePath = (rootPath: string, targetFileName: string): string | null => {
-  const matches: string[] = [];
+const readJsonFile = <T,>(filePath: string): T => {
+  const raw = readFileSync(filePath, 'utf-8');
+  return JSON.parse(raw) as T;
+};
+
+const listManifestPaths = (rootPath: string): string[] => {
+  const manifests: string[] = [];
   const stack = [rootPath];
 
   while (stack.length > 0) {
     const currentPath = stack.pop();
-    if (!currentPath) {
+    if (!currentPath || !existsSync(currentPath)) {
       continue;
     }
 
@@ -72,35 +84,47 @@ const findUniqueImagePath = (rootPath: string, targetFileName: string): string |
         continue;
       }
 
-      if (entry.isFile() && entry.name === targetFileName) {
-        matches.push(entryPath);
+      if (entry.isFile() && /^DCIS\.Patient_\d+\.2\.json$/i.test(entry.name)) {
+        manifests.push(entryPath);
       }
     }
   }
 
-  if (matches.length > 1) {
-    throw new Error(`Imagem anotada ambigua para ${targetFileName}: ${matches.join(', ')}`);
+  return manifests.sort((left, right) => left.localeCompare(right));
+};
+
+const loadLocalTileEntries = (): LocalTileEntry[] => {
+  const manifestPaths = listManifestPaths(DCIS_ROOT);
+
+  if (manifestPaths.length === 0) {
+    throw new Error(`Nenhum manifesto local foi encontrado em ${DCIS_ROOT}.`);
   }
 
-  return matches[0] ?? null;
+  return manifestPaths.flatMap((manifestPath) => {
+    const patientFolder = path.basename(path.dirname(manifestPath));
+    const localPrefix = path.posix.join('DCIS', patientFolder);
+
+    return readJsonFile<DcisEntry[]>(manifestPath).map((entry) => ({
+      ...entry,
+      local_patient_folder: patientFolder,
+      local_relative_file_name: entry.file_name
+        ? path.posix.join(localPrefix, imageSeedTransformService.normalizeFileName(entry.file_name))
+        : null,
+    }));
+  });
 };
 
-const readJsonFile = <T,>(filePath: string): T => {
-  const raw = readFileSync(filePath, 'utf-8');
-  return JSON.parse(raw) as T;
-};
+const resolveLocalImageBinaryPath = (localRelativeFileName: string | null): string | null => {
+  if (!localRelativeFileName) {
+    return null;
+  }
 
-const resolveImageBinaryPath = (normalizedFileName: string): string | null => {
-  const candidateRaw = path.resolve(IMAGES_RAW_ROOT, normalizedFileName);
+  const candidateRaw = path.resolve(IMAGES_RAW_ROOT, localRelativeFileName);
   if (existsSync(candidateRaw)) {
     return candidateRaw;
   }
 
-  const candidateByName = path.resolve(IMAGES_ROOT, normalizedFileName);
-  if (existsSync(candidateByName)) {
-    return candidateByName;
-  }
-
+  const normalizedFileName = localRelativeFileName;
   const ext = path.extname(normalizedFileName) || '.png';
   const base = path.basename(normalizedFileName, ext);
   const fallbackName = `${base}_rgb_labels${ext}`;
@@ -110,7 +134,7 @@ const resolveImageBinaryPath = (normalizedFileName: string): string | null => {
     return candidateByFallback;
   }
 
-  return findUniqueImagePath(IMAGES_ROOT, fallbackName);
+  return null;
 };
 
 const createConstraints = async (neo4jService: Neo4jService, session: Session) => {
@@ -122,9 +146,14 @@ const createConstraints = async (neo4jService: Neo4jService, session: Session) =
 
 const main = async () => {
   const coco = readJsonFile<CocoFile>(COCO_PATH);
-  const dcis = readJsonFile<DcisEntry[]>(DCIS_PATH);
-  const imageSeedTransformService = new ImageSeedTransformService();
+  const allLocalTileEntries = loadLocalTileEntries();
+  const heldOutTileEntries = allLocalTileEntries.filter((entry) => HELD_OUT_LOCAL_PATIENT_FOLDERS.has(entry.local_patient_folder));
+  const dcis = allLocalTileEntries.filter((entry) => !HELD_OUT_LOCAL_PATIENT_FOLDERS.has(entry.local_patient_folder));
+  const heldOutImageIds = new Set(heldOutTileEntries.map((entry) => entry.id));
+  const seededImages = coco.images.filter((image) => !heldOutImageIds.has(image.id));
+  const seededAnnotations = coco.annotations.filter((annotation) => !heldOutImageIds.has(annotation.image_id));
   const neo4jService = new Neo4jService();
+  const localTileByImageId = new Map(dcis.map((entry) => [entry.id, entry]));
 
   await neo4jService.verifyConnectivity();
 
@@ -135,6 +164,8 @@ const main = async () => {
       await neo4jService.executeWrite(session, 'MATCH (n) DETACH DELETE n');
       console.log('[seed] Banco limpo (NEO4J_SEED_CLEAR=true).');
     }
+
+    console.log(`[seed] Holdout local: ${Array.from(HELD_OUT_LOCAL_PATIENT_FOLDERS).join(', ')} | imagens excluidas=${heldOutImageIds.size}`);
 
     await createConstraints(neo4jService, session);
 
@@ -158,9 +189,10 @@ const main = async () => {
       { batchSize: BATCH_SIZE, label: 'categorias' },
     );
 
-    const imageRows = await Promise.all(coco.images.map(async (image) => {
+    const imageRows = await Promise.all(seededImages.map(async (image) => {
       const row = imageSeedTransformService.toSeedImageRow(image);
-      const imageBinaryPath = resolveImageBinaryPath(row.file_name);
+      const localTileEntry = localTileByImageId.get(row.id);
+      const imageBinaryPath = resolveLocalImageBinaryPath(localTileEntry?.local_relative_file_name ?? null);
 
       if (!imageBinaryPath) {
         return {
@@ -224,7 +256,7 @@ const main = async () => {
       { batchSize: BATCH_SIZE, label: 'imagens' },
     );
 
-    const annotationRows = coco.annotations.map((annotation) => ({
+    const annotationRows = seededAnnotations.map((annotation) => ({
       id: annotation.id,
       image_id: annotation.image_id,
       category_id: annotation.category_id,
@@ -262,6 +294,8 @@ const main = async () => {
       id: entry.id,
       key: entry.key ?? null,
       file_name: entry.file_name ? imageSeedTransformService.normalizeFileName(entry.file_name) : null,
+      local_patient_folder: entry.local_patient_folder,
+      local_relative_file_name: entry.local_relative_file_name,
       width: entry.width ?? null,
       height: entry.height ?? null,
       mpp: entry.mpp ?? null,
@@ -277,6 +311,8 @@ const main = async () => {
       MERGE (t:Tile {id: row.id})
       SET t.key = row.key,
           t.file_name = row.file_name,
+          t.local_patient_folder = row.local_patient_folder,
+          t.local_relative_file_name = row.local_relative_file_name,
           t.width = row.width,
           t.height = row.height,
           t.mpp = row.mpp,
@@ -284,7 +320,7 @@ const main = async () => {
           t.global_y = row.global_y,
           t.raw_json = row.raw_json
       WITH t, row
-      MATCH (i:Image {file_name: row.file_name})
+        MATCH (i:Image {id: row.id})
       MERGE (t)-[:REFERS_TO_IMAGE]->(i)
       `,
       tileRows,

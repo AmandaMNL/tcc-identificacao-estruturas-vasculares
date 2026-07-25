@@ -3,11 +3,91 @@ import path from 'node:path';
 import sharp from 'sharp';
 
 type VascularStructure = {
-  id: string | null;
+  id: string | number | null;
   label?: string;
-  x: number;
-  y: number;
   confidence: number;
+  contour_points: Point[];
+  x?: number;
+  y?: number;
+};
+
+const contourToSvgPoints = (points: Point[], width: number, height: number): string => {
+  return points
+    .map((point) => `${clamp(point.x, 0, width)},${clamp(point.y, 0, height)}`)
+    .join(' ');
+};
+
+const polygonArea = (points: Point[]): number => {
+  if (!Array.isArray(points) || points.length < 3) {
+    return 0;
+  }
+
+  let area = 0;
+
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    area += current.x * next.y - next.x * current.y;
+  }
+
+  return Math.abs(area / 2);
+};
+
+const boundingBoxForPoints = (points: Point[]) => {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
+  };
+};
+
+const expandContourIfTiny = (points: Point[], width: number, height: number): Point[] => {
+  if (!Array.isArray(points) || points.length < 3) {
+    return points;
+  }
+
+  const area = polygonArea(points);
+  const box = boundingBoxForPoints(points);
+  const boxWidth = Math.max(1, box.maxX - box.minX);
+  const boxHeight = Math.max(1, box.maxY - box.minY);
+  const minArea = Math.max(2500, (width * height) * 0.00002);
+
+  if (area >= minArea && boxWidth >= 12 && boxHeight >= 12) {
+    return points;
+  }
+
+  const cx = (box.minX + box.maxX) / 2;
+  const cy = (box.minY + box.maxY) / 2;
+  const rx = Math.max(12, boxWidth * 2.5);
+  const ry = Math.max(12, boxHeight * 2.5);
+  const steps = Math.max(8, points.length * 2);
+
+  return Array.from({ length: steps }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / steps;
+    const wobble = index % 2 === 0 ? 1 : 0.72;
+
+    return {
+      x: clamp(cx + Math.cos(angle) * rx * wobble, 0, width),
+      y: clamp(cy + Math.sin(angle) * ry * wobble, 0, height),
+    };
+  });
+};
+
+const anchorPointForContour = (points: Point[], width: number, height: number): Point | null => {
+  if (!Array.isArray(points) || points.length === 0) {
+    return null;
+  }
+
+  const anchor = points[0];
+
+  return {
+    x: clamp(anchor.x + 6, 0, width),
+    y: clamp(anchor.y - 6, 0, height),
+  };
 };
 
 type Point = {
@@ -78,21 +158,38 @@ export class ImageAnnotatorService {
 
     const vesselMarks = payload.vascular_structures
       .map((structure) => {
-        const cx = clamp(structure.x, 0, width);
-        const cy = clamp(structure.y, 0, height);
         const confidence = clamp(structure.confidence, 0, 1);
-        const radius = 4 + confidence * 6;
         const stroke = strokeColorForLabel(structure.label);
+        const normalizedContour = Array.isArray(structure.contour_points) && structure.contour_points.length >= 3
+          ? expandContourIfTiny(structure.contour_points, width, height)
+          : typeof structure.x === 'number' && typeof structure.y === 'number'
+            ? expandContourIfTiny([
+              { x: structure.x - 10, y: structure.y - 10 },
+              { x: structure.x + 10, y: structure.y - 10 },
+              { x: structure.x + 10, y: structure.y + 10 },
+              { x: structure.x - 10, y: structure.y + 10 },
+            ], width, height)
+            : [];
 
-        return `<circle cx="${cx}" cy="${cy}" r="${radius.toFixed(2)}" fill="none" stroke="${stroke}" stroke-width="2" />`;
+        const polygonPoints = contourToSvgPoints(normalizedContour, width, height);
+
+        if (!polygonPoints) {
+          return '';
+        }
+
+        const fillOpacity = (0.18 + (confidence * 0.18)).toFixed(2);
+        const anchor = anchorPointForContour(normalizedContour, width, height) ?? { x: 0, y: 0 };
+
+        return `
+          <g>
+            <polygon points="${polygonPoints}" fill="${stroke}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" data-confidence="${confidence.toFixed(2)}" />
+          </g>
+        `;
       })
       .join('');
 
     const tumorPolyline = payload.tumor_boundaries.length > 1
-      ? `<polyline points="${payload.tumor_boundaries
-        .map((point) => `${clamp(point.x, 0, width)},${clamp(point.y, 0, height)}`)
-        .map((point) => escapeXml(point))
-        .join(' ')}" fill="none" stroke="#ff1744" stroke-width="2" />`
+      ? `<polyline points="${escapeXml(contourToSvgPoints(payload.tumor_boundaries, width, height))}" fill="none" stroke="#35c6ff" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" />`
       : '';
 
     const overlaySvg = `
@@ -116,7 +213,7 @@ export class ImageAnnotatorService {
   }
 
   saveBase64Image(base64: string, prefix = 'response'): string {
-    const outputDir = path.resolve(process.cwd(), 'src/response');
+    const outputDir = path.resolve(process.cwd(), 'response');
     mkdirSync(outputDir, { recursive: true });
 
     const buffer = Buffer.from(base64, 'base64');

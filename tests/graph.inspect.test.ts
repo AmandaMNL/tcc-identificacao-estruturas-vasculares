@@ -6,7 +6,7 @@ import { OpenRouterService } from '../src/services/openrouter.service.ts';
 import { ImageAnnotatorService } from '../src/services/image.annotator.ts';
 
 test('graph should use image from data and prompt builders from image.analiser.ts', async () => {
-  const imagePath = 'data/images/DCIS/Patient_001/10_rgb_labels.png';
+  const imagePath = 'data/imagesRaw/DCIS/Patient_001/10.png';
   const imageBase64 = readFileSync(imagePath).toString('base64');
 
   const graph = buildGraph({

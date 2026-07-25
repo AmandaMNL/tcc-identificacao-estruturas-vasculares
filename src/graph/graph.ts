@@ -9,13 +9,17 @@ import { responseNode } from './nodes/response.ts';
 import type { StructuredLlmService } from '../services/openrouter.service.ts';
 import type { RagService } from '../services/rag.service.ts';
 import type { ImageAnnotatorService } from '../services/image.annotator.ts';
+import config from '../config.ts';
 
 export const schema = z.object({
   model: z.string().default('openai/gpt-5-image-mini'),
   imageBase64: z.string().default(''),
   imageMimeType: z.string().default('image/png'),
+  imageWidth: z.number().int().nonnegative().default(0),
+  imageHeight: z.number().int().nonnegative().default(0),
   imageSignature: z.string().default(''),
   responseImagePath: z.string().default(''),
+  responseJsonPath: z.string().default(''),
   responseError: z.string().default(''),
   content: z.string().default(''),
   question: z.string().default('Identify vascular structures present in this image.'),
@@ -35,8 +39,14 @@ export type GraphDependencies = {
 export function buildGraph(
   dependencies: GraphDependencies,
 ) {
+  const sendImageToLlm = dependencies.sendImageToLlm ?? config.sendImageToLlm;
+
   const routeAfterLlmResponse = (state: GraphState) => {
-    return state.responseError?.trim() ? 'response' : 'applyOverlay';
+    if (state.responseError?.trim()) {
+      return 'response';
+    }
+
+    return sendImageToLlm ? 'saveResult' : 'applyOverlay';
   };
 
   const workflow = new StateGraph({
@@ -47,6 +57,7 @@ export function buildGraph(
     .addNode('generateLlmResponse', llmResponse({
       llmClient: dependencies.llmClient,
       ragService: dependencies.ragService,
+      sendImageToLlm,
     }))
     .addNode('applyOverlay', applyOverlay({
       imageAnnotatorService: dependencies.imageAnnotatorService,

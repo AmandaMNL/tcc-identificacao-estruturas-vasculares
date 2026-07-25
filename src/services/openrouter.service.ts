@@ -119,6 +119,54 @@ export class OpenRouterService implements StructuredLlmService {
     return value;
   }
 
+  private extractJsonPayload(content: unknown): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => {
+          if (typeof part === 'string') {
+            return part;
+          }
+
+          if (part && typeof part === 'object' && 'type' in part && 'text' in part) {
+            return String((part as { text?: unknown }).text ?? '');
+          }
+
+          return '';
+        })
+        .join('');
+    }
+
+    return String(content ?? '');
+  }
+
+  private unwrapMarkdownCodeFence(payload: string): string {
+    const fencedMatch = payload.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+
+    if (fencedMatch?.[1]) {
+      return fencedMatch[1].trim();
+    }
+
+    return payload;
+  }
+
+  private parseStructuredJson<T>(rawContent: unknown, schema: z.ZodSchema<T>): T {
+    const payload = this.unwrapMarkdownCodeFence(this.extractJsonPayload(rawContent).trim());
+    const firstBrace = payload.indexOf('{');
+    const lastBrace = payload.lastIndexOf('}');
+    const jsonText = firstBrace >= 0 && lastBrace >= firstBrace
+      ? payload.slice(firstBrace, lastBrace + 1)
+      : payload;
+
+    const parsed = JSON.parse(jsonText) as unknown;
+    const validated = schema.parse(parsed);
+
+    return this.sanitizeData(validated) as T;
+  }
+
   async generateStructured(
     systemPrompt: string,
     userPrompt: string,
@@ -217,13 +265,8 @@ export class OpenRouterService implements StructuredLlmService {
           }),
         ];
 
-        const structuredLlm = this.llmClient.withStructuredOutput(schema, {
-          name: 'response',
-        });
-
-        const data = this.sanitizeData(
-          await structuredLlm.invoke(messages),
-        ) as Record<string, unknown>;
+        const rawResponse = await this.llmClient.invoke(messages);
+        const data = this.parseStructuredJson(rawResponse.content, schema) as Record<string, unknown>;
 
         return {
           success: true,
@@ -232,6 +275,7 @@ export class OpenRouterService implements StructuredLlmService {
       } catch (error) {
         const shouldRetry = (
           this.isRateLimitError(error)
+          || error instanceof SyntaxError
           || this.isTruncatedJsonError(error)
           || this.isInvalidImagePayloadError(error)
         )
