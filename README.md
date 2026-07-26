@@ -1,227 +1,305 @@
-# Aplicação de algoritmos de Inteligência Artificial e Visão Computacional na Identificação Automatizada de Estruturas Vasculares em Tecidos Tumorais
+# Fluxo completo do projeto
 
-## Estado do projeto
+Este documento explica o funcionamento atual do fluxo de análise de imagens vasculares do projeto, do carregamento da imagem até a resposta final salva em disco. O objetivo é registrar de forma clara como a aplicação foi montada, o papel de cada configuração e as escolhas técnicas feitas para integrar TypeScript, Node.js, LangChain, OpenRouter, RAG e Neo4j.
 
-Este repositório contém um protótipo acadêmico de segmentação binária de estruturas vasculares em imagens de tecido tumoral. O fluxo converte anotações poligonais no formato COCO em máscaras, treina uma U-Net, registra a divisão dos dados no checkpoint e calcula Dice e IoU no subconjunto de validação.
+## Visão geral
 
-O material local permite somente um experimento exploratório. As dez imagens disponíveis correspondem ao `Patient_001`; portanto, uma divisão entre essas imagens não mede generalização entre pacientes. Além disso, os arquivos atuais terminam em `_rgb_labels.png` e contêm contornos coloridos visíveis. Esses contornos revelam os rótulos ao modelo e caracterizam vazamento de informação. Por segurança, o comando de treino rejeita esses arquivos por padrão.
+O fluxo principal segue esta ideia:
 
-Este software não é um dispositivo médico, não foi validado clinicamente e não deve fundamentar diagnóstico ou decisão clínica.
+1. a imagem de entrada é carregada e normalizada;
+2. a assinatura da imagem é calculada para busca por similaridade;
+3. o RAG recupera contexto no Neo4j com base nessa assinatura;
+4. o prompt JSON é montado com instruções específicas;
+5. o modelo da OpenRouter gera a resposta;
+6. dependendo das flags de configuração, a resposta pode vir como contorno estruturado ou como imagem anotada;
+7. o resultado final é salvo em `response/` na raiz do projeto.
 
-## Evidências presentes no material fornecido
+O projeto hoje trabalha com dois modos principais:
 
-Os números abaixo foram obtidos diretamente dos arquivos incluídos no repositório, sem extrapolação:
+- modo contorno: a LLM devolve JSON com `vascular_structures` e o overlay é montado localmente;
+- modo imagem: a LLM devolve `annotated_image_base64` e o sistema apenas salva a imagem produzida.
 
-| Item | Evidência local |
-|---|---:|
-| Imagens no COCO | 608 |
-| Anotações no COCO | 16.431 |
-| Categorias | 4 |
-| Imagens locais | 10 |
-| Paciente das imagens locais | `Patient_001` |
-| Resolução nominal | largura de 1.934 px; altura entre 912 e 921 px |
-| Escala declarada no manifesto | 0,5 mpp |
-| Vasos não dilatados nas 10 imagens | 155 |
-| Vasos com dilatação intermediária nas 10 imagens | 70 |
-| Vasos altamente dilatados nas 10 imagens | 14 |
-| Regiões `CCL21+` nas 10 imagens | 12 |
+## O que cada configuração faz
 
-O arquivo COCO declara descrição `COCO 2017 Dataset`, versão `1.0`, ano `2020` e contribuinte `SciLifeLab BioImage Informatics`. Embora o campo `licenses` do arquivo local esteja vazio, os arquivos correspondem ao conjunto público [S-BIAD463](https://www.ebi.ac.uk/biostudies/studies/S-BIAD463), disponibilizado pelo BioStudies/BioImage Archive sob licença [CC0](https://creativecommons.org/publicdomain/zero/1.0/). A origem, a licença e a publicação associada são registradas em `data/README.md`.
+As principais configurações ficam em [src/config.ts](../src/config.ts).
 
-## Correções em relação ao código anterior
+- `openrouterKey`: chave da API da OpenRouter, lida do ambiente.
+- `baseUrl`: endpoint base da OpenRouter.
+- `httpReferer` e `xTitle`: cabeçalhos usados pela OpenRouter para identificação da aplicação.
+- `models`: lista de modelos candidatos. O primeiro modelo da lista é o escolhido pelo cliente atual.
+- `provider.sort.by`: critério de seleção de provedor. Hoje está em `throughput` para priorizar resposta mais rápida.
+- `provider.sort.partition`: particionamento do provedor. Está como `none`.
+- `temperature`: controla aleatoriedade da saída. Quanto menor, mais determinística tende a ser a resposta.
+- `maxTokens`: limite máximo de tokens de saída.
+- `topK`: quantidade de resultados recuperados pelo RAG.
+- `defaultImagePath`: caminho padrão caso uma imagem não seja informada externamente.
+- `sendImageToLlm`: define se a imagem de entrada será enviada ao modelo.
+- `receviedImage`: define se a saída esperada é uma imagem anotada gerada pela LLM.
+- `maxAttempts`: número máximo de tentativas com retry.
+- `baseRetryDelayMs`: atraso base entre retries.
 
-- Caminhos absolutos foram substituídos por caminhos relativos ao projeto.
-- A seleção por área maior que 200.000 pixels foi removida. A máscara agora inclui apenas as três categorias vasculares declaradas no COCO e exclui semanticamente `CCL21+`.
-- A correspondência entre imagem e anotação usa o manifesto `DCIS.Patient_001.2.json`, evitando colisões com arquivos de mesmo número pertencentes a outros pacientes.
-- Imagens usam interpolação bilinear; máscaras usam vizinho mais próximo, preservando classes binárias.
-- O modelo produz logits e o treino usa `BCEWithLogitsLoss` combinada com perda Dice.
-- A mesma resolução é gravada no checkpoint e reutilizada na avaliação e predição.
-- A divisão treino/validação é determinística e os nomes dos arquivos são armazenados no checkpoint.
-- Checkpoints, ambientes virtuais e artefatos gerados não entram no Git.
-- Textos corrompidos, emojis, duplicações e comentários narrativos foram removidos.
+Observação importante: o nome `receviedImage` mantém o typo do arquivo atual. O comportamento, porém, é claro: quando esse valor está `true`, a saída esperada é uma imagem anotada; quando está `false`, a saída esperada é um JSON com contornos.
 
-## Estrutura
+## Como funciona a integração com OpenRouter e LangChain
 
-```text
-.
-├── .github/
-│   ├── dependabot.yml
-│   └── workflows/quality.yml
-├── data/
-│   ├── annotations/
-│   │   ├── COCO_annotations.json
-│   │   └── DCIS.Patient_001.2.json
-│   ├── images/
-│   └── mask/
-├── src/vascular_segmentation/
-│   ├── cli.py
-│   ├── data.py
-│   ├── model.py
-│   └── training.py
-├── tests/
-├── .python-version
-├── pyproject.toml
-├── uv.lock
-└── README.md
-```
+A integração com OpenRouter está concentrada em [src/services/openrouter.service.ts](../src/services/openrouter.service.ts).
 
-O arquivo `ia_venulas_treinada.pth` foi preservado localmente, mas é ignorado pelo Git. Ele pertence ao fluxo anterior e não contém os metadados exigidos pelo novo formato de checkpoint.
+### Papel do LangChain
 
-## Ambiente Python
+O projeto usa `@langchain/openai` e `@langchain/core` como camada de integração com o modelo. Em vez de chamar a API diretamente, o código cria um `ChatOpenAI` e envia mensagens no formato esperado pelo framework.
 
-O projeto aceita Python 3.11 ou mais recente. A versão local preferida está em `.python-version`; no estado atual ela é 3.14. A validação local usou CPython 3.14.5 para CPU; o lockfile resolveu PyTorch 2.13.0.
+Isso traz algumas vantagens:
 
-O fluxo recomendado usa `uv`, que lê `.python-version`, cria `.venv` e instala as versões exatas registradas em `uv.lock`:
+- padroniza o envio de mensagens de sistema e usuário;
+- facilita o suporte a texto e imagem no mesmo fluxo;
+- simplifica retries e manuseio de falhas;
+- permite alternar entre geração estruturada e geração multimodal sem reescrever toda a integração.
 
-```powershell
-py -3.14 -m pip install "uv>=0.11.16,<0.12"
-uv sync --locked --extra dev
-```
+### OpenRouter como gateway de modelos
 
-Depois disso, execute os comandos como `uv run vascular-segmentation masks`, `uv run ruff check .` e `uv run pytest`.
+A OpenRouter funciona como camada de roteamento entre o projeto e diferentes modelos hospedados por provedores distintos. O mesmo código pode usar modelos de texto ou imagem, dependendo da configuração em `models`.
 
-Como alternativa, no Windows PowerShell, use `venv` e `pip`:
+Hoje o projeto usa dois caminhos principais:
 
-```powershell
-py -3.14 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
+- `generateStructured(...)`: usado quando a resposta é texto/JSON puro;
+- `generateStructuredFromImage(...)`: usado quando a imagem precisa ser enviada junto com o prompt.
 
-Em Linux ou macOS, a alternativa equivalente é:
+### Como a resposta é validada
 
-```bash
-python3.14 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
-```
+O retorno do modelo não é aceito de forma cega. Depois de receber a resposta, o serviço:
 
-Ambientes virtuais isolam as dependências do projeto. No Windows, a documentação oficial recomenda chamar `pip` pelo interpretador selecionado, como `py -3.14 -m pip`.
+1. remove caracteres de controle e sujeira de formatação;
+2. remove cercas markdown como ```json quando existirem;
+3. extrai o trecho JSON;
+4. valida com Zod;
+5. só então devolve o objeto estruturado ao grafo.
 
-Se for necessária uma instalação de PyTorch com CUDA, use o seletor oficial do PyTorch para obter o comando adequado ao sistema operacional e à versão de CUDA. Não foi fixada uma variante CUDA no projeto porque o material fornecido não informa GPU nem ambiente de execução.
+Isso foi necessário porque o modelo às vezes responde com cercas markdown, texto auxiliar ou formatos ligeiramente diferentes do esperado.
 
-## Preparação dos dados
+## Como o prompt JSON foi montado
 
-### 1. Usar imagens sem contornos
+O prompt é construído em [src/prompts/image.analiser.ts](../src/prompts/image.analiser.ts).
 
-Para um experimento válido, substitua os arquivos em `data/images` pelas imagens brutas correspondentes às mesmas dez entradas do manifesto. O identificador numérico deve ser preservado; por exemplo, `2.png` corresponde a `2.png` no manifesto. Não há método confiável implementado para remover os contornos já incorporados aos pixels.
+### Estrutura geral
 
-### 2. Gerar máscaras
+O prompt é dividido em três partes:
 
-```powershell
-uv run vascular-segmentation masks
-```
+1. `getSystemPrompt()`: monta as regras gerais do comportamento do modelo;
+2. `getUserPromptTemplate(...)`: monta a instrução específica da tarefa atual;
+3. contexto RAG: entra no prompt como apoio sem substituir a evidência da imagem.
 
-O comando:
+### Por que JSON
 
-1. lê o COCO e o manifesto do paciente;
-2. valida a correspondência e as dimensões de cada imagem;
-3. seleciona somente `not dilated vessel`, `Intermediately dilated vessel` e `highly dilated vessel`;
-4. rasteriza todos os polígonos dessas categorias em máscara binária;
-5. grava uma máscara com o mesmo nome de cada imagem em `data/mask`.
+O projeto usa JSON porque a saída precisa ser consumida por etapas posteriores do pipeline:
 
-No material atual, o resultado esperado é 10 máscaras e 239 anotações vasculares. O comando imprime a contagem total e a contagem por imagem para auditoria.
+- o overlay local precisa saber onde desenhar;
+- o salvamento precisa manter uma estrutura previsível;
+- os testes conseguem validar campos com facilidade;
+- o fluxo fica menos dependente de texto livre e mais fácil de depurar.
 
-## Treino
+### Quando a saída é contorno
 
-Após fornecer imagens brutas e regenerar as máscaras:
+No modo contorno, o modelo deve devolver um JSON com, no mínimo:
 
-```powershell
-uv run vascular-segmentation train
-```
+- `summary`
+- `has_vascular_structures`
+- `image_width`
+- `image_height`
+- `vascular_structures`
+- `tumor_boundaries`
 
-Parâmetros disponíveis:
+Cada estrutura vascular traz:
 
-| Parâmetro | Padrão | Finalidade |
-|---|---:|---|
-| `--epochs` | 50 | Número de épocas |
-| `--batch-size` | 2 | Amostras por atualização |
-| `--image-size` | 256 | Lado da entrada quadrada; deve ser múltiplo de 16 |
-| `--base-channels` | 32 | Largura inicial da U-Net |
-| `--learning-rate` | 0,001 | Taxa do Adam |
-| `--validation-fraction` | 0,2 | Fração reservada para validação |
-| `--threshold` | 0,5 | Limiar da máscara prevista |
-| `--seed` | 42 | Semente da divisão e inicialização |
-| `--device` | `auto` | Seleciona `cuda` quando disponível, senão `cpu` |
-| `--checkpoint` | `checkpoints/best.pt` | Destino do melhor checkpoint por Dice |
+- `id`
+- `label`
+- `confidence`
+- `contour_points`
 
-O parâmetro `--allow-annotated-inputs` existe somente para reproduzir uma execução exploratória com os arquivos atuais. Seu uso não corrige o vazamento de rótulo e os resultados não devem ser apresentados como desempenho de generalização.
+O contorno é o formato escolhido porque ele descreve melhor a forma real da estrutura do que um único ponto central.
 
-## Avaliação e predição
+### Quando a saída é imagem
 
-Avaliar exatamente os arquivos de validação registrados no checkpoint:
+No modo imagem, o prompt pede:
 
-```powershell
-uv run vascular-segmentation evaluate
-```
+- `summary`
+- `has_vascular_structures`
+- `image_width`
+- `image_height`
+- `annotated_image_base64`
 
-Gerar uma máscara binária na resolução original de uma imagem:
+Nesse caso a intenção é que a própria LLM devolva a imagem já anotada, reduzindo a necessidade de montagem local do overlay.
 
-```powershell
-uv run vascular-segmentation predict data\images\2.png --output artifacts\2_mask.png
-```
+### Papel das flags no prompt
 
-Dice e IoU são calculados de forma agregada sobre os pixels do subconjunto. Um resultado cientificamente defensável exige, no mínimo, imagens brutas, separação por paciente e um conjunto de teste independente que não seja usado para escolher arquitetura, hiperparâmetros ou limiar.
+- `sendImageToLlm = false`: o modelo recebe apenas o contexto textual do RAG e devolve contornos em JSON.
+- `sendImageToLlm = true`: o modelo recebe a imagem de entrada e pode usá-la para gerar a resposta.
+- `receviedImage = true`: o modelo deve devolver imagem anotada.
+- `receviedImage = false`: o modelo deve devolver contornos estruturados.
 
-## Qualidade e testes
+## O que é RAG e como foi feito
 
-```powershell
-uv run ruff check .
-uv run pytest
-```
+RAG significa Retrieval-Augmented Generation. Na prática, é o processo de recuperar contexto relevante antes de perguntar ao modelo.
 
-O workflow `quality.yml` executa lint e testes em Python 3.11, 3.12, 3.13 e 3.14. Uma tarefa semanal adicional testa automaticamente a versão estável mais recente disponível no GitHub Actions. Essa tarefa é informativa (`continue-on-error`) porque uma nova versão do Python pode surgir antes de PyTorch e outras dependências publicarem pacotes compatíveis.
+Neste projeto, o RAG ajuda a LLM de duas formas:
 
-## Atualizações de Python e dependências
+- traz o contexto do caso mais semelhante;
+- entrega metadados e artefatos auxiliares do paciente semelhante.
 
-Atualização totalmente automática do interpretador de um experimento treinado não é recomendável: uma mudança de versão pode alterar a resolução de dependências e a reprodutibilidade. O projeto usa um fluxo controlado:
+### Por que o RAG foi usado
 
-1. `uv.lock` registra versões exatas e multiplataforma das dependências.
-2. Dependabot abre propostas semanais de atualização para o lockfile e para GitHub Actions.
-3. O CI testa todas as versões explicitamente suportadas.
-4. O job `latest-stable-python` detecta automaticamente compatibilidade com uma nova versão estável.
-5. Depois de o CI passar, atualize `.python-version`, execute os testes e registre a mudança em commit.
+O problema não é apenas “descrever uma imagem”; é identificar estruturas vasculares dentro de um domínio específico, com anotações e classes pré-existentes. O RAG reduz a chance de o modelo trabalhar só no vazio, porque ele recebe:
 
-Se o interpretador for gerenciado pelo `uv`, `uv python upgrade 3.14` atualiza automaticamente para o patch mais recente da série 3.14. O próprio `uv` não atualiza automaticamente entre versões menores, como 3.14 para 3.15, porque isso pode mudar a resolução das dependências.
+- imagens de referência;
+- máscara;
+- anotação local;
+- manifesto do caso;
+- contexto textual recuperado do Neo4j.
 
-## Controle de versão
+Isso melhora a coerência da resposta, principalmente em rótulos de classe e na interpretação do padrão morfológico.
 
-O diretório foi preparado para Git. Um fluxo mínimo é:
+## Por que Neo4j foi usado
 
-```powershell
-git status
-git add .
-git commit -m "Reestrutura projeto de segmentacao vascular"
-```
+O Neo4j foi escolhido porque o problema não é só de arquivo, mas de relacionamento entre entidades.
 
-As imagens e anotações do subconjunto local podem ser versionadas porque o registro de origem S-BIAD463 declara licença CC0. A atribuição científica continua sendo preservada no README e deve ser mantida em publicações derivadas. Pesos `.pth` e `.pt` permanecem ignorados; se precisarem ser publicados, use armazenamento próprio para artefatos e documente a versão do código, o conjunto de dados e os hiperparâmetros que os produziram.
+### O que fica no grafo
 
-## Limitações conhecidas e próximos requisitos científicos
+O seed local registra entidades como:
 
-- Não há imagens brutas no material recebido; todas as imagens locais aparentam conter sobreposições de rótulos.
-- Há somente um paciente local, impedindo avaliação independente por paciente.
-- O COCO local não fornece licença no campo `licenses`; a licença CC0 foi confirmada no registro de origem S-BIAD463.
-- Não foi fornecido protocolo de aquisição, definição histopatológica do alvo, aprovação ética, estratégia de amostragem ou referência bibliográfica do conjunto.
-- A redução para 256 × 256 deforma imagens originalmente retangulares. Ela foi mantida como configuração inicial computacional, não como escolha metodológica validada. Estudos posteriores devem comparar recortes, preservação de proporção e resolução compatível com a escala das estruturas.
-- A segmentação é binária; as três classes de dilatação são unidas. Uma tarefa multiclasse exigiria objetivos e validação próprios.
-- Não há conjunto de teste externo nem estimativa de incerteza.
+- imagens;
+- anotações;
+- categorias;
+- tiles;
+- relações entre esses nós.
 
-Essas lacunas devem ser resolvidas antes de interpretar métricas como evidência sobre desempenho clínico ou populacional.
+### Vantagens do Neo4j
 
-## Fontes técnicas
+- permite navegar por relações de forma natural;
+- facilita recuperar contexto do caso mais parecido;
+- organiza imagens, categorias e anotações sem depender apenas de busca por arquivo;
+- ajuda a associar imagem bruta, imagem marcada, máscara e metadados do mesmo caso.
 
-- [Ronneberger, Fischer e Brox: U-Net para segmentação de imagens biomédicas](https://doi.org/10.1007/978-3-319-24574-4_28)
-- [Taha e Hanbury: métricas para avaliação de segmentação em imagens médicas](https://doi.org/10.1186/s12880-015-0068-x)
-- [Python: uso no Windows](https://docs.python.org/3/using/windows.html)
-- [Python: ambientes virtuais com `venv`](https://docs.python.org/3/library/venv.html)
-- [PyPA: metadados de projeto e `requires-python`](https://packaging.python.org/en/latest/specifications/declaring-project-metadata/)
-- [PyTorch: instalação local e requisitos](https://docs.pytorch.org/get-started/locally/)
-- [PyTorch: `BCEWithLogitsLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html)
-- [GitHub: atualizações de versão com Dependabot](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-version-updates)
-- [GitHub Actions: configuração de Python](https://docs.github.com/en/actions/how-tos/use-cases-and-examples/building-and-testing/building-and-testing-python)
-- [uv: versões e atualização de Python](https://docs.astral.sh/uv/concepts/python-versions/)
-- [uv: integração com Dependabot](https://docs.astral.sh/uv/guides/integration/dependabot/)
+### O que o RAG recupera com Neo4j
 
-As afirmações sobre o conteúdo e as contagens do conjunto local provêm dos arquivos `COCO_annotations.json`, `DCIS.Patient_001.2.json` e das dez imagens fornecidas, não das fontes técnicas externas.
+O fluxo de recuperação busca o caso mais próximo por similaridade de assinatura e depois usa o grafo para montar contexto. Isso é melhor do que procurar apenas por nome de arquivo, porque o dataset tem vários arquivos com nomes semelhantes e estrutura hierárquica por paciente.
+
+## Como o TypeScript e Node.js são usados
+
+O projeto está em TypeScript e roda em Node.js moderno.
+
+### Por que TypeScript
+
+- melhora a segurança de tipos no pipeline;
+- ajuda a documentar o formato esperado de cada etapa;
+- reduz erro de integração entre nós do grafo;
+- facilita evolução do contrato JSON e dos schemas Zod.
+
+### Por que Node.js
+
+- executa facilmente scripts de preparação, seed e testes;
+- integra bem com Sharp, Neo4j e LangChain;
+- permite usar o sistema de módulos moderno (`type: module`);
+- simplifica o fluxo de automação acadêmica e prototipagem.
+
+### Como o projeto roda
+
+Os scripts principais estão em `package.json`:
+
+- `data:prepare`: prepara dataset e artefatos derivados;
+- `neo4j:seed`: popula o grafo com os dados locais;
+- `analyze:image`: executa o fluxo principal;
+- `test`: roda os testes com Node native test runner;
+- `langgraph:serve`: expõe o grafo via LangGraph CLI.
+
+## Fluxo técnico por etapa
+
+### 1. Leitura da imagem
+
+A imagem é carregada como base64 e normalizada. Isso permite padronizar a entrada para o restante do fluxo.
+
+### 2. Assinatura de imagem
+
+A assinatura é calculada para busca por similaridade. O objetivo é encontrar o caso mais próximo no espaço de dados do projeto.
+
+### 3. Recuperação RAG
+
+O serviço de RAG consulta o Neo4j, encontra o caso semelhante e monta o contexto que será enviado ao modelo.
+
+### 4. Montagem do prompt
+
+O prompt recebe:
+
+- instruções de comportamento;
+- contexto do caso recuperado;
+- modo de saída esperado;
+- dimensões da imagem;
+- regras sobre o formato JSON.
+
+### 5. Chamada ao modelo
+
+Dependendo da configuração, o fluxo usa texto puro ou multimodal.
+
+### 6. Pós-processamento
+
+- se a saída for contorno, o overlay local monta a imagem final;
+- se a saída for imagem, o sistema salva a imagem retornada pela LLM;
+- em ambos os casos o JSON também é preservado em `response/`.
+
+### 7. Persistência
+
+Os artefatos finais ficam na pasta `response/` na raiz do projeto:
+
+- imagem final;
+- JSON da resposta.
+
+## Acertos do projeto
+
+- Separação por paciente nas estruturas locais e nos dados derivados.
+- Uso de RAG para trazer contexto específico do caso.
+- Neo4j como base relacional para recuperar pacientes, imagens e anotações.
+- Prompt JSON mais estável e fácil de testar.
+- Tratamento de falhas do provedor com retry e sanitização.
+- Suporte a dois modos de saída: contorno e imagem anotada.
+- Persistência da resposta em artefatos separados para auditoria.
+
+## Falhas e limitações encontradas
+
+### Falhas técnicas
+
+- O provedor às vezes devolve Markdown com cercas ```json, o que exigiu parser tolerante.
+- O provedor pode rejeitar schemas muito rígidos ou combinações específicas de multimodal + structured output.
+- O modelo às vezes devolve `id` numérico, exigindo schema mais flexível.
+- A montagem local de overlay pode ficar visualmente distante do esperado se o contorno vier pequeno ou simplificado demais.
+
+### Limitações do conjunto e do experimento
+
+- Há limitação de dados disponíveis para teste real.
+- O custo de chamadas multimodais é maior do que o fluxo somente textual.
+- Respostas com imagem anotada tendem a ser mais caras e mais lentas.
+- O contexto RAG melhora a precisão, mas não substitui validação visual e científica.
+
+### Limitação orçamentária
+
+Para obter melhores resultados, especialmente com imagem gerada pela IA, normalmente seria necessário:
+
+- testar modelos mais fortes e mais caros;
+- aumentar o número de tentativas com variações de prompt;
+- comparar múltiplos modelos de visão;
+- usar mais imagens de referência e mais contexto recuperado.
+
+O projeto, porém, foi montado com restrição de orçamento e custo por chamada. Por isso, o fluxo atual privilegia:
+
+- uso de um modelo único principal;
+- prompts enxutos;
+- RAG para reduzir desperdício de contexto;
+- fallback local de overlay quando a imagem da IA não é necessária.
+
+## Conclusão
+
+O projeto foi estruturado para ser um protótipo funcional, auditável e extensível. O uso de TypeScript, Node.js, LangChain, OpenRouter, RAG e Neo4j permite separar bem cada responsabilidade do pipeline e facilita evolução posterior.
+
+O fluxo atual cobre duas necessidades distintas:
+
+- geração de contornos para montagem local;
+- geração de imagem anotada pela própria LLM.
+
+Essa separação é importante porque permite equilibrar custo, velocidade e qualidade visual de acordo com o objetivo da execução.
