@@ -1,4 +1,4 @@
-import { START, END, StateGraph } from '@langchain/langgraph';
+import { START, END, StateGraph, MessagesZodState } from '@langchain/langgraph';
 import { z } from 'zod';
 import { getImage } from './nodes/get.image.ts';
 import { processImage } from './nodes/process.image.ts';
@@ -11,7 +11,8 @@ import type { RagService } from '../services/rag.service.ts';
 import type { ImageAnnotatorService } from '../services/image.annotator.ts';
 import config from '../config.ts';
 
-export const schema = z.object({
+// `messages` (com reducer) habilita a aba Chat no LangGraph Studio.
+export const schema = MessagesZodState.extend({
   model: z.string().default('openai/gpt-5-image-mini'),
   imageBase64: z.string().default(''),
   imageMimeType: z.string().default('image/png'),

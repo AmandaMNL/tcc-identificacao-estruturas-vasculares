@@ -47,16 +47,30 @@ const contourToPolygon = (contourPoints?: Array<{ x: number; y: number }>, x?: n
   return [];
 };
 
+// O LLM devolve coordenadas normalizadas 0-1000 (ver prompts/image.analiser.ts).
+export const NORMALIZED_COORDINATE_SCALE = 1000;
+
+const toPixels = (point: { x: number; y: number }, width: number, height: number) => ({
+  x: Math.round((point.x / NORMALIZED_COORDINATE_SCALE) * width),
+  y: Math.round((point.y / NORMALIZED_COORDINATE_SCALE) * height),
+});
+
 export function applyOverlay(dependencies: OverlayDependencies) {
   return async (state: GraphState): Promise<Partial<GraphState>> => {
     const parsed = JSON.parse(state.llmResponse) as CoordinatesPayload;
+    const { imageWidth: width, imageHeight: height } = state;
+    const scalePoint = (point: { x: number; y: number }) => toPixels(point, width, height);
 
-    const vascularStructures = Array.isArray(parsed.vascular_structures)
-      ? parsed.vascular_structures
-      : [];
-    const tumorBoundaries = Array.isArray(parsed.tumor_boundaries)
-      ? parsed.tumor_boundaries
-      : [];
+    const vascularStructures = (Array.isArray(parsed.vascular_structures) ? parsed.vascular_structures : [])
+      .map((structure) => ({
+        ...structure,
+        contour_points: structure.contour_points?.map(scalePoint),
+        ...(typeof structure.x === 'number' && typeof structure.y === 'number'
+          ? scalePoint({ x: structure.x, y: structure.y })
+          : {}),
+      }));
+    const tumorBoundaries = (Array.isArray(parsed.tumor_boundaries) ? parsed.tumor_boundaries : [])
+      .map(scalePoint);
 
     const normalizedStructures = vascularStructures
       .map((structure) => ({
@@ -74,8 +88,12 @@ export function applyOverlay(dependencies: OverlayDependencies) {
     );
 
     return {
+      // JSON salvo fica em pixels da imagem original.
       llmResponse: JSON.stringify({
         ...parsed,
+        coordinate_space: 'pixels',
+        vascular_structures: vascularStructures,
+        tumor_boundaries: tumorBoundaries,
         annotated_image_base64: annotatedImageBase64,
       }),
     };

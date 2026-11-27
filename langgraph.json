@@ -3,5 +3,8 @@
   "graphs": {
     "tcc": "./src/graph/factory.ts:graph"
   },
+  "http": {
+    "app": "./src/http/app.ts:app"
+  },
   "env": ".env"
 }

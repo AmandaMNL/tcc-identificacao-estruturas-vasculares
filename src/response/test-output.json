@@ -3,5 +3,8 @@
   "has_vascular_structures": true,
   "image_width": 1934,
   "image_height": 917,
-  "annotated_image_base64": "bG9jYWwtaW1hZ2UtYW5ub3RhdGlvbi1iYXNlNjQ="
+  "annotated_image_base64": "bG9jYWwtaW1hZ2UtYW5ub3RhdGlvbi1iYXNlNjQ=",
+  "coordinate_space": "pixels",
+  "vascular_structures": [],
+  "tumor_boundaries": []
 }

@@ -37,6 +37,7 @@
     "@langchain/core": "^1.2.3",
     "@langchain/langgraph": "^1.4.8",
     "@langchain/openai": "^1.5.5",
+    "hono": "^4.12.32",
     "langchain": "^1.5.3",
     "neo4j-driver": "^6.2.0",
     "sharp": "^0.35.3"
