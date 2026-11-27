@@ -14,8 +14,11 @@ const config = {
   maxTokens: Number(process.env.OPENROUTER_MAX_TOKENS ?? 32000),
   topK: 5,
   defaultImagePath: '',
-  sendImageToLlm: true,
-  receivedImage: false,
+  // true: envia a imagem para o LLM (necessário para o modelo enxergar a lâmina)
+  sendImageToLlm: (process.env.LLM_SEND_IMAGE ?? 'true') === 'true',
+  // false: LLM devolve coordenadas e o código desenha o overlay (applyOverlay)
+  // true: LLM gera a imagem anotada sozinho (sem overlay do código)
+  receivedImage: (process.env.LLM_RECEIVED_IMAGE ?? 'false') === 'true',
   maxAttempts: 3,
   baseRetryDelayMs: 2000,
 };

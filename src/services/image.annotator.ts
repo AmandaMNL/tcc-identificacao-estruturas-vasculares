@@ -50,29 +50,28 @@ const expandContourIfTiny = (points: Point[], width: number, height: number): Po
     return points;
   }
 
-  const area = polygonArea(points);
   const box = boundingBoxForPoints(points);
-  const boxWidth = Math.max(1, box.maxX - box.minX);
-  const boxHeight = Math.max(1, box.maxY - box.minY);
-  const minArea = Math.max(2500, (width * height) * 0.00002);
+  const boxWidth = box.maxX - box.minX;
+  const boxHeight = box.maxY - box.minY;
+  const minSize = 12;
 
-  if (area >= minArea && boxWidth >= 12 && boxHeight >= 12) {
+  // Preserva o contorno do LLM; só garante tamanho mínimo visível para contornos degenerados.
+  if (polygonArea(points) > 0 && boxWidth >= minSize && boxHeight >= minSize) {
     return points;
   }
 
   const cx = (box.minX + box.maxX) / 2;
   const cy = (box.minY + box.maxY) / 2;
-  const rx = Math.max(12, boxWidth * 2.5);
-  const ry = Math.max(12, boxHeight * 2.5);
-  const steps = Math.max(8, points.length * 2);
+  const rx = Math.max(minSize, boxWidth) / 2;
+  const ry = Math.max(minSize, boxHeight) / 2;
+  const steps = 16;
 
   return Array.from({ length: steps }, (_, index) => {
     const angle = (Math.PI * 2 * index) / steps;
-    const wobble = index % 2 === 0 ? 1 : 0.72;
 
     return {
-      x: clamp(cx + Math.cos(angle) * rx * wobble, 0, width),
-      y: clamp(cy + Math.sin(angle) * ry * wobble, 0, height),
+      x: clamp(cx + Math.cos(angle) * rx, 0, width),
+      y: clamp(cy + Math.sin(angle) * ry, 0, height),
     };
   });
 };
